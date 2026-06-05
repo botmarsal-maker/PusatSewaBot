@@ -69,8 +69,8 @@ def list_produk(message):
     
     bot.send_message(chat_id, pesan, reply_markup=inline_markup)
 
-# Handler untuk tombol transparant / Inline Keyboard
-@bot.callback_query_handler(func=lambda call: True)
+# Handler untuk tombol transparant / Inline Keyboard (Diganti logic supaya tidak bocor ke callback admin)
+@bot.callback_query_handler(func=lambda call: call.data in ["next", "populer"])
 def callback_query(call):
     if call.data == "next":
         bot.answer_callback_query(call.id, "Halaman selanjutnya belum tersedia.")
@@ -135,13 +135,112 @@ if __name__ == "__main__":
     bot.polling(none_stop=True)
 `;
 
-export default function TelegramBotCodePage() {
-  const [copied, setCopied] = useState(false);
+const pythonAdminCode = `# ==========================================
+# KODE TAMBAHAN: FITUR PANEL ADMIN (DAPUR TOKO)
+# Tempelkan kode ini di atas: if __name__ == "__main__":
+# ==========================================
 
-  const handleCopy = () => {
+# 1. Variabel Admin
+ADMIN_USERNAME = "username_saya_disini" # Ganti tanpa awalan '@'
+
+# 2. Perintah /loginowner
+@bot.message_handler(commands=['loginowner'])
+def login_owner(message):
+    chat_id = message.chat.id
+    username = message.from_user.username
+    
+    # Validasi Username Telegram
+    if username != ADMIN_USERNAME:
+        bot.send_message(chat_id, "❌ Akses Ditolak!")
+        return
+        
+    pesan = "Selamat datang di Panel Admin! 👨‍💻\\nSilakan pilih menu pengaturan toko:"
+    
+    # InlineKeyboardMarkup dengan 3 tombol
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton('📦 Update Stok', callback_data='admin_stok'),
+        InlineKeyboardButton('💳 Atur Pembayaran', callback_data='admin_bayar'),
+        InlineKeyboardButton('➕ Tambah Saldo', callback_data='admin_saldo')
+    )
+    
+    bot.send_message(chat_id, pesan, reply_markup=markup)
+
+# 3. Callback Handler Admin
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+def admin_callback(call):
+    chat_id = call.message.chat.id
+    username = call.from_user.username
+    
+    # Validasi ulang di level callback
+    if username != ADMIN_USERNAME:
+        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
+        return
+        
+    if call.data == 'admin_stok':
+        panduan = "Untuk update stok produk, ketik perintah:\\n`/updatestok [id_produk] [jumlah_baru]`\\nContoh: `/updatestok 1 20`"
+        bot.send_message(chat_id, panduan, parse_mode='Markdown')
+    elif call.data == 'admin_bayar':
+        bot.send_message(chat_id, "ℹ️ Panduan: Ketik /aturpembayaran [metode] [nomor_rekening]")
+    elif call.data == 'admin_saldo':
+        panduan = "Untuk tambah saldo user, ketik perintah:\\n`/tambahsaldo [chat_id] [jumlah]`\\nContoh: `/tambahsaldo 1234567 50000`"
+        bot.send_message(chat_id, panduan, parse_mode='Markdown')
+        
+    bot.answer_callback_query(call.id)
+
+# 4. Perintah Eksekusi Admin (/updatestok)
+@bot.message_handler(commands=['updatestok'])
+def update_stok(message):
+    chat_id = message.chat.id
+    username = message.from_user.username
+    
+    # Validasi Username Telegram
+    if username != ADMIN_USERNAME:
+        bot.send_message(chat_id, "❌ Akses Ditolak!")
+        return
+        
+    try:
+        # Menangkap ID produk dan jumlah baru menggunakan split()
+        # Format: /updatestok [id_produk] [jumlah_baru]
+        parts = message.text.split()
+        if len(parts) != 3:
+            bot.send_message(chat_id, "❌ Format salah!\\nGunakan: /updatestok [id_produk] [jumlah_baru]")
+            return
+            
+        product_id = parts[1]
+        jumlah_baru = int(parts[2])
+        
+        # Validasi apakah ID produk ada di products_db
+        if product_id not in products_db:
+            bot.send_message(chat_id, f"❌ ID Produk '{product_id}' tidak ditemukan di Database!")
+            return
+            
+        # Eksekusi Update Stok
+        products_db[product_id]["stok"] = jumlah_baru
+        nama_produk = products_db[product_id]["nama"]
+        
+        bot.send_message(chat_id, f"✅ Stok berhasil diupdate!\\n\\n📦 Produk: {nama_produk}\\n📊 Stok Baru: {jumlah_baru}")
+        
+    except ValueError:
+        bot.send_message(chat_id, "❌ Jumlah stok harus berupa angka!")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Terjadi kesalahan system: {str(e)}")
+`;
+
+export default function TelegramBotCodePage() {
+  const [copiedMain, setCopiedMain] = useState(false);
+  const [copiedAdmin, setCopiedAdmin] = useState(false);
+
+  const handleCopyMain = () => {
     navigator.clipboard.writeText(pythonCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setCopiedMain(true);
+    setTimeout(() => setCopiedMain(false), 2500);
+  };
+  
+  const handleCopyAdmin = () => {
+    navigator.clipboard.writeText(pythonAdminCode);
+    setCopiedAdmin(true);
+    setTimeout(() => setCopiedAdmin(false), 2500);
   };
 
   return (
@@ -191,10 +290,10 @@ export default function TelegramBotCodePage() {
               <span className="text-sm font-mono text-neutral-400">bot.py</span>
             </div>
             <button
-              onClick={handleCopy}
+              onClick={handleCopyMain}
               className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
             >
-              {copied ? (
+              {copiedMain ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="text-emerald-400">Disalin</span>
@@ -202,7 +301,7 @@ export default function TelegramBotCodePage() {
               ) : (
                 <>
                   <Copy className="w-3.5 h-3.5" />
-                  <span>Salin Kode</span>
+                  <span>Salin Kode Utama</span>
                 </>
               )}
             </button>
@@ -210,6 +309,44 @@ export default function TelegramBotCodePage() {
           <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
             <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
               <code>{pythonCode}</code>
+            </pre>
+          </div>
+        </motion.div>
+
+        {/* ADMIN CODE BLOCK */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="mt-10 bg-neutral-900 rounded-2xl border border-indigo-900/50 overflow-hidden shadow-2xl relative"
+        >
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+          <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-indigo-900/30">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-indigo-400" />
+              <span className="text-sm font-mono text-indigo-200">admin_panel.py</span>
+              <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full ml-2">Baru ✨</span>
+            </div>
+            <button
+              onClick={handleCopyAdmin}
+              className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-indigo-950 hover:bg-indigo-900 text-indigo-300"
+            >
+              {copiedAdmin ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Disalin</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Salin Kode Tambahan</span>
+                </>
+              )}
+            </button>
+          </div>
+          <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
+            <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
+              <code>{pythonAdminCode}</code>
             </pre>
           </div>
         </motion.div>
