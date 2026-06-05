@@ -5,11 +5,18 @@ import { Copy, Check, Terminal, Play, Bot, Package, DollarSign } from 'lucide-re
 import { motion } from 'motion/react';
 
 const pythonCode = `import telebot
+import os
+from dotenv import load_dotenv
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-# Masukkan Token Bot Telegram Anda di sini
-# Anda bisa mendapatkan token dari @BotFather di Telegram
-API_TOKEN = 'YOUR_BOT_TOKEN_HERE'
+# Memuat environment variables dari file .env
+load_dotenv()
+
+# Mengambil token dari environment
+API_TOKEN = os.getenv('API_TOKEN')
+if not API_TOKEN:
+    raise ValueError("API_TOKEN tidak ditemukan. Pastikan sudah diset di file .env")
+
 bot = telebot.TeleBot(API_TOKEN)
 
 # 1. Database Sementara (Mock Database) menggunakan Dictionary
@@ -140,8 +147,8 @@ const pythonAdminCode = `# ==========================================
 # Tempelkan kode ini di atas: if __name__ == "__main__":
 # ==========================================
 
-# 1. Variabel Admin
-ADMIN_USERNAME = "username_saya_disini" # Ganti tanpa awalan '@'
+# 1. Variabel Admin (Dimuat dari .env)
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
 
 # 2. Perintah /loginowner
 @bot.message_handler(commands=['loginowner'])
@@ -227,9 +234,76 @@ def update_stok(message):
         bot.send_message(chat_id, f"❌ Terjadi kesalahan system: {str(e)}")
 `;
 
+const pythonInteractiveAdminCode = `# ==========================================
+# 1. GANTI BAGIAN 'admin_stok' PADA CALLBACK ADMIN SEBELUMNYA MENJADI:
+# ==========================================
+    if call.data == 'admin_stok':
+        bot.send_message(chat_id, "📦 *Daftar Produk untuk Diedit:*", parse_mode='Markdown')
+        for pid, pdata in products_db.items():
+            text_produk = f"[{pid}] {pdata['nama']}\\nStok: {pdata['stok']}"
+            markup_edit = InlineKeyboardMarkup(row_width=2)
+            markup_edit.add(
+                InlineKeyboardButton('✏️ Edit Nama', callback_data=f'editnama_{pid}'),
+                InlineKeyboardButton('✏️ Edit Stok', callback_data=f'editstok_{pid}')
+            )
+            bot.send_message(chat_id, text_produk, reply_markup=markup_edit)
+
+# ==========================================
+# 2. TAMBAHKAN BAGIAN INI DI BAWAH (SEBELUM if __name__ == "__main__":):
+# ==========================================
+# 5. Handler Edit Interaktif (Nama & Stok)
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('editnama_', 'editstok_')))
+def edit_interactive_callback(call):
+    chat_id = call.message.chat.id
+    username = call.from_user.username
+    
+    if username != ADMIN_USERNAME:
+        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
+        return
+        
+    action, pid = call.data.split('_')
+    
+    if pid not in products_db:
+        bot.answer_callback_query(call.id, "❌ Produk tidak ditemukan!", show_alert=True)
+        return
+        
+    if action == 'editnama':
+        msg = bot.send_message(chat_id, f"Ketik nama produk baru untuk ID {pid}:")
+        bot.register_next_step_handler(msg, process_edit_nama, pid)
+    elif action == 'editstok':
+        msg = bot.send_message(chat_id, f"Ketik jumlah stok baru untuk ID {pid}:")
+        bot.register_next_step_handler(msg, process_edit_stok, pid)
+        
+    bot.answer_callback_query(call.id)
+
+def process_edit_nama(message, pid):
+    chat_id = message.chat.id
+    if message.text.startswith('/'):
+        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah.")
+        return
+        
+    nama_baru = message.text
+    products_db[pid]["nama"] = nama_baru
+    bot.send_message(chat_id, f"✅ Nama produk berhasil diubah menjadi {nama_baru}!")
+
+def process_edit_stok(message, pid):
+    chat_id = message.chat.id
+    if message.text.startswith('/'):
+        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah.")
+        return
+        
+    try:
+        stok_baru = int(message.text)
+        products_db[pid]["stok"] = stok_baru
+        bot.send_message(chat_id, f"✅ Stok produk ID {pid} berhasil diubah menjadi {stok_baru}!")
+    except ValueError:
+        bot.send_message(chat_id, "❌ Gagal! Stok harus berupa angka.")
+`;
+
 export default function TelegramBotCodePage() {
   const [copiedMain, setCopiedMain] = useState(false);
   const [copiedAdmin, setCopiedAdmin] = useState(false);
+  const [copiedInteractive, setCopiedInteractive] = useState(false);
 
   const handleCopyMain = () => {
     navigator.clipboard.writeText(pythonCode);
@@ -241,6 +315,12 @@ export default function TelegramBotCodePage() {
     navigator.clipboard.writeText(pythonAdminCode);
     setCopiedAdmin(true);
     setTimeout(() => setCopiedAdmin(false), 2500);
+  };
+
+  const handleCopyInteractive = () => {
+    navigator.clipboard.writeText(pythonInteractiveAdminCode);
+    setCopiedInteractive(true);
+    setTimeout(() => setCopiedInteractive(false), 2500);
   };
 
   return (
@@ -351,10 +431,48 @@ export default function TelegramBotCodePage() {
           </div>
         </motion.div>
 
+        {/* INTERACTIVE ADMIN CODE BLOCK */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="mt-10 bg-neutral-900 rounded-2xl border border-indigo-500/50 overflow-hidden shadow-2xl relative"
+        >
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+          <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-emerald-900/30">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-mono text-emerald-200">admin_interactive.py</span>
+              <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full ml-2">Update ✨</span>
+            </div>
+            <button
+              onClick={handleCopyInteractive}
+              className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-emerald-950 hover:bg-emerald-900 text-emerald-300"
+            >
+              {copiedInteractive ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Disalin</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Salin Kode Tambahan</span>
+                </>
+              )}
+            </button>
+          </div>
+          <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
+            <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
+              <code>{pythonInteractiveAdminCode}</code>
+            </pre>
+          </div>
+        </motion.div>
+
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.4 }}
           className="mt-12 p-6 bg-neutral-900/50 rounded-2xl border border-neutral-800"
         >
           <h3 className="text-base font-medium flex items-center gap-2 mb-4 text-neutral-200">
@@ -362,8 +480,8 @@ export default function TelegramBotCodePage() {
             Cara Menjalankan
           </h3>
           <ol className="space-y-3 text-sm text-neutral-400 font-mono">
-            <li><span className="text-neutral-600 mr-2">1.</span>pip install pyTelegramBotAPI</li>
-            <li><span className="text-neutral-600 mr-2">2.</span>Ubah <span className="text-indigo-400">YOUR_BOT_TOKEN_HERE</span> dengan token dari @BotFather</li>
+            <li><span className="text-neutral-600 mr-2">1.</span>pip install pyTelegramBotAPI python-dotenv</li>
+            <li><span className="text-neutral-600 mr-2">2.</span>Buat file <span className="text-indigo-400">.env</span> lalu masukkan <span className="text-emerald-400">API_TOKEN</span> dan <span className="text-emerald-400">ADMIN_USERNAME</span></li>
             <li><span className="text-neutral-600 mr-2">3.</span>python bot.py</li>
           </ol>
         </motion.div>

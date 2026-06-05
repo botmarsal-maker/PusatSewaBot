@@ -1,9 +1,16 @@
 import telebot
+import os
+from dotenv import load_dotenv
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-# Masukkan Token Bot Telegram Anda di sini
-# Anda bisa mendapatkan token dari @BotFather di Telegram
-API_TOKEN = 'YOUR_BOT_TOKEN_HERE'
+# Memuat environment variables dari file .env
+load_dotenv()
+
+# Mengambil token dari environment
+API_TOKEN = os.getenv('API_TOKEN')
+if not API_TOKEN:
+    raise ValueError("API_TOKEN tidak ditemukan. Pastikan sudah diset di file .env")
+
 bot = telebot.TeleBot(API_TOKEN)
 
 # 1. Database Sementara (Mock Database) menggunakan Dictionary
@@ -127,8 +134,8 @@ def handle_other_menu(message):
 # KODE TAMBAHAN: FITUR PANEL ADMIN (DAPUR TOKO)
 # ==========================================
 
-# 1. Variabel Admin
-ADMIN_USERNAME = "username_saya_disini" # Ganti tanpa awalan '@'
+# 1. Variabel Admin (Dimuat dari .env)
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
 
 # 2. Perintah /loginowner
 @bot.message_handler(commands=['loginowner'])
@@ -146,7 +153,7 @@ def login_owner(message):
     # InlineKeyboardMarkup dengan 3 tombol
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
-        InlineKeyboardButton('📦 Update Stok', callback_data='admin_stok'),
+        InlineKeyboardButton('📦 Atur Stok', callback_data='admin_stok'),
         InlineKeyboardButton('💳 Atur Pembayaran', callback_data='admin_bayar'),
         InlineKeyboardButton('➕ Tambah Saldo', callback_data='admin_saldo')
     )
@@ -165,8 +172,15 @@ def admin_callback(call):
         return
         
     if call.data == 'admin_stok':
-        panduan = "Untuk update stok produk, ketik perintah:\n`/updatestok [id_produk] [jumlah_baru]`\nContoh: `/updatestok 1 20`"
-        bot.send_message(chat_id, panduan, parse_mode='Markdown')
+        bot.send_message(chat_id, "📦 *Daftar Produk untuk Diedit:*", parse_mode='Markdown')
+        for pid, pdata in products_db.items():
+            text_produk = f"[{pid}] {pdata['nama']}\nStok: {pdata['stok']}"
+            markup_edit = InlineKeyboardMarkup(row_width=2)
+            markup_edit.add(
+                InlineKeyboardButton('✏️ Edit Nama', callback_data=f'editnama_{pid}'),
+                InlineKeyboardButton('✏️ Edit Stok', callback_data=f'editstok_{pid}')
+            )
+            bot.send_message(chat_id, text_produk, reply_markup=markup_edit)
     elif call.data == 'admin_bayar':
         bot.send_message(chat_id, "ℹ️ Panduan: Ketik /aturpembayaran [metode] [nomor_rekening]")
     elif call.data == 'admin_saldo':
@@ -212,6 +226,54 @@ def update_stok(message):
         bot.send_message(chat_id, "❌ Jumlah stok harus berupa angka!")
     except Exception as e:
         bot.send_message(chat_id, f"❌ Terjadi kesalahan system: {str(e)}")
+
+# 5. Handler Edit Interaktif (Nama & Stok)
+@bot.callback_query_handler(func=lambda call: call.data.startswith(('editnama_', 'editstok_')))
+def edit_interactive_callback(call):
+    chat_id = call.message.chat.id
+    username = call.from_user.username
+    
+    if username != ADMIN_USERNAME:
+        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
+        return
+        
+    action, pid = call.data.split('_')
+    
+    if pid not in products_db:
+        bot.answer_callback_query(call.id, "❌ Produk tidak ditemukan!", show_alert=True)
+        return
+        
+    if action == 'editnama':
+        msg = bot.send_message(chat_id, f"Ketik nama produk baru untuk ID {pid}:")
+        bot.register_next_step_handler(msg, process_edit_nama, pid)
+    elif action == 'editstok':
+        msg = bot.send_message(chat_id, f"Ketik jumlah stok baru untuk ID {pid}:")
+        bot.register_next_step_handler(msg, process_edit_stok, pid)
+        
+    bot.answer_callback_query(call.id)
+
+def process_edit_nama(message, pid):
+    chat_id = message.chat.id
+    if message.text.startswith('/'):
+        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah lain.")
+        return
+        
+    nama_baru = message.text
+    products_db[pid]["nama"] = nama_baru
+    bot.send_message(chat_id, f"✅ Nama produk berhasil diubah menjadi {nama_baru}!")
+
+def process_edit_stok(message, pid):
+    chat_id = message.chat.id
+    if message.text.startswith('/'):
+        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah lain.")
+        return
+        
+    try:
+        stok_baru = int(message.text)
+        products_db[pid]["stok"] = stok_baru
+        bot.send_message(chat_id, f"✅ Stok produk ID {pid} berhasil diubah menjadi {stok_baru}!")
+    except ValueError:
+        bot.send_message(chat_id, "❌ Gagal! Stok harus berupa angka.")
 
 # Menjalankan bot (loop terus menerus)
 if __name__ == "__main__":
