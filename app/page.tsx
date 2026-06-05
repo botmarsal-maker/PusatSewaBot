@@ -1,10 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Copy, Check, Terminal, Play, Bot, Package, DollarSign } from 'lucide-react';
+import { Copy, Check, Terminal, Play, Bot, Package, LayoutDashboard } from 'lucide-react';
 import { motion } from 'motion/react';
 
-const pythonCode = `import telebot
+const pythonBaseCode = `import telebot
 import os
 from dotenv import load_dotenv
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -20,23 +20,25 @@ if not API_TOKEN:
 bot = telebot.TeleBot(API_TOKEN)
 
 # 1. Database Sementara (Mock Database) menggunakan Dictionary
-users_db = {}
 products_db = {
     "1": {"nama": "Netflix Premium 1 Bulan", "stok": 10, "harga": 30000},
     "2": {"nama": "Spotify Premium 1 Bulan", "stok": 5, "harga": 20000},
     "3": {"nama": "Canva Pro 1 Bulan", "stok": 0, "harga": 15000},
 }
+user_balances = {} # Menyimpan saldo user berdasarkan chat_id
+users_db = set() # Menyimpan semua chat_id yang berinteraksi (untuk Broadcast & Statistik)
 
 # 2. Perintah /start & Menu Custom Bawah (ReplyKeyboardMarkup)
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
+    users_db.add(chat_id)
     
     # Berikan saldo awal Rp50.000 jika user baru (untuk testing)
-    if chat_id not in users_db:
-        users_db[chat_id] = 50000
+    if chat_id not in user_balances:
+        user_balances[chat_id] = 50000
     
-    saldo = users_db[chat_id]
+    saldo = user_balances[chat_id]
     
     # Membuat custom keyboard bawah (ReplyKeyboardMarkup)
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
@@ -76,7 +78,7 @@ def list_produk(message):
     
     bot.send_message(chat_id, pesan, reply_markup=inline_markup)
 
-# Handler untuk tombol transparant / Inline Keyboard (Diganti logic supaya tidak bocor ke callback admin)
+# Handler untuk tombol transparant / Inline Keyboard reguler
 @bot.callback_query_handler(func=lambda call: call.data in ["next", "populer"])
 def callback_query(call):
     if call.data == "next":
@@ -85,18 +87,18 @@ def callback_query(call):
         bot.answer_callback_query(call.id, "Netflix Premium adalah produk paling populer!", show_alert=True)
 
 # 4. Logika Checkout (Auto-Order)
-@bot.message_handler(func=lambda message: message.text in ['1', '2', '3'])
+@bot.message_handler(func=lambda message: message.text in products_db.keys())
 def handle_checkout(message):
     chat_id = message.chat.id
     product_id = message.text
     
-    # Pastikan user sudah pernah /start
-    if chat_id not in users_db:
+    # Pastikan user sudah ada
+    if chat_id not in user_balances:
         bot.send_message(chat_id, "Silakan ketik /start terlebih dahulu.")
         return
         
     produk = products_db[product_id]
-    saldo = users_db[chat_id]
+    saldo = user_balances[chat_id]
     harga = produk["harga"]
     stok = produk["stok"]
     nama_produk = produk["nama"]
@@ -112,10 +114,10 @@ def handle_checkout(message):
         return
         
     # Eksekusi Pembelian
-    users_db[chat_id] -= harga
+    user_balances[chat_id] -= harga
     products_db[product_id]["stok"] -= 1
     
-    sisa_saldo = users_db[chat_id]
+    sisa_saldo = user_balances[chat_id]
     
     # Pesan sukses beserta detail akun dummy
     pesan_sukses = (
@@ -135,192 +137,230 @@ def handle_checkout(message):
 @bot.message_handler(func=lambda message: message.text in ['🛍 Voucher', '📁 Laporan Stok', '💰 Deposit', '❓ Cara Order', '⚠️ Information'])
 def handle_other_menu(message):
     bot.send_message(message.chat.id, f"Anda memilih menu: {message.text}.\\nFitur ini sedang dalam pengembangan 🛠️.")
+`;
 
-# Menjalankan bot (loop terus menerus)
+const pythonProAdminCode = `# ==========================================
+# DASHBOARD ADMIN PROFESIONAL TERPADU
+# (Gabungkan ini di bawah kode utama bot.py Anda)
+# ==========================================
+
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
+
+@bot.message_handler(commands=['admin', 'loginowner'])
+def admin_dashboard(message):
+    chat_id = message.chat.id
+    username = message.from_user.username
+    
+    if username != ADMIN_USERNAME:
+        bot.send_message(chat_id, "❌ *Akses Ditolak!*\\nAnda bukan administrator.", parse_mode='Markdown')
+        return
+        
+    show_admin_menu(chat_id)
+
+def show_admin_menu(chat_id, message_id=None):
+    pesan = (
+        "👑 *PANEL ADMINISTRATOR* 👑\\n\\n"
+        "Selamat datang di pusat kendali toko.\\n"
+        "Pilih manuver yang ingin Anda atur:"
+    )
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton('📦 Kelola Produk', callback_data='adm_produk'),
+        InlineKeyboardButton('💰 Kelola Saldo', callback_data='adm_saldo'),
+        InlineKeyboardButton('📢 Broadcast', callback_data='adm_bc'),
+        InlineKeyboardButton('📊 Statistik Toko', callback_data='adm_stats'),
+        InlineKeyboardButton('❌ Tutup Panel', callback_data='adm_close')
+    )
+    if message_id:
+        bot.edit_message_text(pesan, chat_id, message_id, reply_markup=markup, parse_mode='Markdown')
+    else:
+        bot.send_message(chat_id, pesan, reply_markup=markup, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('adm_'))
+def admin_callback_handler(call):
+    chat_id = call.message.chat.id
+    username = call.from_user.username
+    
+    if username != ADMIN_USERNAME:
+        bot.answer_callback_query(call.id, "❌ Akses Ditolak!", show_alert=True)
+        return
+        
+    action = call.data
+    
+    if action == 'adm_close':
+        bot.delete_message(chat_id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+        
+    elif action == 'adm_back':
+        show_admin_menu(chat_id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+
+    elif action == 'adm_stats':
+        total_stok = sum(p['stok'] for p in products_db.values())
+        total_uang_beredar = sum(user_balances.values()) if user_balances else 0
+        pesan = (
+            "📊 *Statistik Toko Saat Ini*\\n\\n"
+            f"👥 Total Pengguna: {len(users_db)}\\n"
+            f"🛍 Total Variasi Produk: {len(products_db)}\\n"
+            f"📦 Total Stok Gudang: {total_stok}\\n"
+            f"💵 Total Uang Beredar: Rp {total_uang_beredar:,}\\n"
+        )
+        markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='adm_back'))
+        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif action == 'adm_produk':
+        pesan = "📦 *Manajemen Produk*\\n\\nPilih produk untuk diedit, atau tambah produk:"
+        markup = InlineKeyboardMarkup(row_width=1)
+        for pid, pdata in products_db.items():
+            markup.add(InlineKeyboardButton(f"{pdata['nama']} (Stok: {pdata['stok']})", callback_data=f"adm_ep_{pid}"))
+        markup.row(
+            InlineKeyboardButton('➕ Tambah Baru', callback_data='adm_addprod'),
+            InlineKeyboardButton('🔙 Kembali', callback_data='adm_back')
+        )
+        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif action.startswith('adm_ep_'): # Edit Product
+        pid = action.split('_')[2]
+        if pid not in products_db:
+            bot.answer_callback_query(call.id, "Produk hilang!", show_alert=True)
+            return
+            
+        p = products_db[pid]
+        pesan = f"🛠️ *Detail Produk: {pid}*\\n\\nNama: {p['nama']}\\nHarga: Rp {p['harga']:,}\\nStok: {p['stok']}"
+        markup = InlineKeyboardMarkup(row_width=3)
+        markup.add(
+            InlineKeyboardButton('📝 Nama', callback_data=f'adm_snama_{pid}'),
+            InlineKeyboardButton('📦 Stok', callback_data=f'adm_sstok_{pid}'),
+            InlineKeyboardButton('💰 Harga', callback_data=f'adm_sharga_{pid}')
+        )
+        markup.add(
+            InlineKeyboardButton('🗑 Hapus Produk', callback_data=f'adm_del_{pid}'),
+            InlineKeyboardButton('🔙 Kembali', callback_data='adm_produk')
+        )
+        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+    elif action.startswith('adm_s'): # Set Field (nama, stok, harga)
+        parts = action.split('_')
+        field = parts[1][1:] # mengambil nama/stok/harga tanpa awalan 's'
+        pid = parts[2]
+        
+        msg = bot.send_message(chat_id, f"📝 Masukkan *{field}* baru untuk ID [{pid}]:\\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_update_field, pid, field)
+        bot.answer_callback_query(call.id)
+        
+    elif action.startswith('adm_del_'):
+        pid = action.split('_')[2]
+        if pid in products_db:
+            nama = products_db[pid]['nama']
+            del products_db[pid]
+            bot.answer_callback_query(call.id, f"Produk {nama} telah dihapus!", show_alert=True)
+            admin_callback_handler(type('obj', (object,), {'data': 'adm_produk', 'message': call.message, 'from_user': call.from_user, 'id': call.id})())
+
+    elif action == 'adm_addprod':
+        msg = bot.send_message(chat_id, "➕ *Tambah Produk Baru*\\n\\nKetik detail produk dengan format:\\n${'`'}ID | Nama Produk | Harga | Stok${'`'}\\nContoh: ${'`'}4 | MLBB 86 Diamonds | 25000 | 50${'`'}\\n\\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_add_produk)
+        bot.answer_callback_query(call.id)
+
+    elif action == 'adm_bc':
+        msg = bot.send_message(chat_id, "📢 *Broadcast Message*\\n\\nKetik pesan yang akan dikirim ke seluruh pengguna:\\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_broadcast)
+        bot.answer_callback_query(call.id)
+        
+    elif action == 'adm_saldo':
+        msg = bot.send_message(chat_id, "💰 *Kelola Saldo Pengguna*\\n\\nKetik Chat ID dan Nominal.\\nFormat: ${'`'}CHAT_ID Nominal${'`'}\\nContoh: ${'`'}123456789 50000${'`'} (untuk tambah Rp 50.000)\\n\\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_add_saldo)
+        bot.answer_callback_query(call.id)
+
+def process_update_field(message, pid, field):
+    if message.text.lower() == '/batal' or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
+        return
+        
+    try:
+        val = message.text
+        if field in ['stok', 'harga']:
+            val = int(val)
+        products_db[pid][field] = val
+        bot.send_message(message.chat.id, f"✅ Sukses! Atribut *{field}* pada produk ID {pid} kini menjadi: {val}", parse_mode='Markdown')
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Gagal! Pastikan harga/stok menggunakan format angka (tanpa titik/koma).")
+
+def process_add_produk(message):
+    if message.text.lower() == '/batal' or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
+        return
+        
+    try:
+        parts = [p.strip() for p in message.text.split('|')]
+        if len(parts) != 4:
+            bot.send_message(message.chat.id, "❌ Gagal! Pastikan format sesuai:\\n${'`'}ID | Nama Produk | Harga | Stok${'`'}", parse_mode='Markdown')
+            return
+            
+        pid, nama, harga, stok = parts
+        products_db[pid] = {"nama": nama, "harga": int(harga), "stok": int(stok)}
+        bot.send_message(message.chat.id, f"✅ Produk *{nama}* berhasil ditambahkan ke katalog!", parse_mode='Markdown')
+    except Exception as e:
+        bot.send_message(message.chat.id, f"❌ Terjadi kesalahan: {e}")
+
+def process_broadcast(message):
+    if message.text.lower() == '/batal' or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Broadcast dibatalkan.")
+        return
+        
+    sukses = 0
+    for uid in list(users_db):
+        try:
+            bot.send_message(uid, f"📢 *PENGUMUMAN*\\n\\n{message.text}", parse_mode='Markdown')
+            sukses += 1
+        except:
+            pass
+    bot.send_message(message.chat.id, f"✅ Siaran Broadcast berhasil terkirim ke *{sukses}* pengguna.", parse_mode='Markdown')
+
+def process_add_saldo(message):
+    if message.text.lower() == '/batal' or message.text.startswith('/'):
+        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
+        return
+        
+    try:
+        uid_str, nominal_str = message.text.split()
+        uid = int(uid_str)
+        nominal = int(nominal_str)
+        
+        if uid not in user_balances:
+            user_balances[uid] = 0 
+            
+        user_balances[uid] += nominal
+        bot.send_message(message.chat.id, f"✅ Saldo user ${'`'}{uid}${'`'} berhasil ditambah Rp {nominal:,}.\\nTotal Saldo Baru: Rp {user_balances[uid]:,}", parse_mode='Markdown')
+        
+        try:
+            bot.send_message(uid, f"💰 *Deposit Masuk!*\\n\\nSelamat, saldo Anda telah ditambahkan sebesar *Rp {nominal:,}* oleh tim Admin. Selamat berbelanja!", parse_mode='Markdown')
+        except:
+            pass
+    except ValueError:
+        bot.send_message(message.chat.id, "❌ Gagal! Pastikan format sesuai: ${'`'}ID_USER NOMINAL_ANGKA${'`'}", parse_mode='Markdown')
+    except Exception:
+        bot.send_message(message.chat.id, "❌ Terjadi kesalahan yang tidak terduga.")
+
 if __name__ == "__main__":
-    print("Bot sedang berjalan...")
+    print("Bot sedang berjalan... (Tekan Ctrl+C untuk berhenti)")
     bot.polling(none_stop=True)
 `;
 
-const pythonAdminCode = `# ==========================================
-# KODE TAMBAHAN: FITUR PANEL ADMIN (DAPUR TOKO)
-# Tempelkan kode ini di atas: if __name__ == "__main__":
-# ==========================================
-
-# 1. Variabel Admin (Dimuat dari .env)
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
-
-# 2. Perintah /loginowner
-@bot.message_handler(commands=['loginowner'])
-def login_owner(message):
-    chat_id = message.chat.id
-    username = message.from_user.username
-    
-    # Validasi Username Telegram
-    if username != ADMIN_USERNAME:
-        bot.send_message(chat_id, "❌ Akses Ditolak!")
-        return
-        
-    pesan = "Selamat datang di Panel Admin! 👨‍💻\\nSilakan pilih menu pengaturan toko:"
-    
-    # InlineKeyboardMarkup dengan 3 tombol
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        InlineKeyboardButton('📦 Update Stok', callback_data='admin_stok'),
-        InlineKeyboardButton('💳 Atur Pembayaran', callback_data='admin_bayar'),
-        InlineKeyboardButton('➕ Tambah Saldo', callback_data='admin_saldo')
-    )
-    
-    bot.send_message(chat_id, pesan, reply_markup=markup)
-
-# 3. Callback Handler Admin
-@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
-def admin_callback(call):
-    chat_id = call.message.chat.id
-    username = call.from_user.username
-    
-    # Validasi ulang di level callback
-    if username != ADMIN_USERNAME:
-        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
-        return
-        
-    if call.data == 'admin_stok':
-        panduan = "Untuk update stok produk, ketik perintah:\\n${'`'}/updatestok [id_produk] [jumlah_baru]${'`'}\\nContoh: ${'`'}/updatestok 1 20${'`'}"
-        bot.send_message(chat_id, panduan, parse_mode='Markdown')
-    elif call.data == 'admin_bayar':
-        bot.send_message(chat_id, "ℹ️ Panduan: Ketik /aturpembayaran [metode] [nomor_rekening]")
-    elif call.data == 'admin_saldo':
-        panduan = "Untuk tambah saldo user, ketik perintah:\\n${'`'}/tambahsaldo [chat_id] [jumlah]${'`'}\\nContoh: ${'`'}/tambahsaldo 1234567 50000${'`'}"
-        bot.send_message(chat_id, panduan, parse_mode='Markdown')
-        
-    bot.answer_callback_query(call.id)
-
-# 4. Perintah Eksekusi Admin (/updatestok)
-@bot.message_handler(commands=['updatestok'])
-def update_stok(message):
-    chat_id = message.chat.id
-    username = message.from_user.username
-    
-    # Validasi Username Telegram
-    if username != ADMIN_USERNAME:
-        bot.send_message(chat_id, "❌ Akses Ditolak!")
-        return
-        
-    try:
-        # Menangkap ID produk dan jumlah baru menggunakan split()
-        # Format: /updatestok [id_produk] [jumlah_baru]
-        parts = message.text.split()
-        if len(parts) != 3:
-            bot.send_message(chat_id, "❌ Format salah!\\nGunakan: /updatestok [id_produk] [jumlah_baru]")
-            return
-            
-        product_id = parts[1]
-        jumlah_baru = int(parts[2])
-        
-        # Validasi apakah ID produk ada di products_db
-        if product_id not in products_db:
-            bot.send_message(chat_id, f"❌ ID Produk '{product_id}' tidak ditemukan di Database!")
-            return
-            
-        # Eksekusi Update Stok
-        products_db[product_id]["stok"] = jumlah_baru
-        nama_produk = products_db[product_id]["nama"]
-        
-        bot.send_message(chat_id, f"✅ Stok berhasil diupdate!\\n\\n📦 Produk: {nama_produk}\\n📊 Stok Baru: {jumlah_baru}")
-        
-    except ValueError:
-        bot.send_message(chat_id, "❌ Jumlah stok harus berupa angka!")
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Terjadi kesalahan system: {str(e)}")
-`;
-
-const pythonInteractiveAdminCode = `# ==========================================
-# 1. GANTI BAGIAN 'admin_stok' PADA CALLBACK ADMIN SEBELUMNYA MENJADI:
-# ==========================================
-    if call.data == 'admin_stok':
-        bot.send_message(chat_id, "📦 *Daftar Produk untuk Diedit:*", parse_mode='Markdown')
-        for pid, pdata in products_db.items():
-            text_produk = f"[{pid}] {pdata['nama']}\\nStok: {pdata['stok']}"
-            markup_edit = InlineKeyboardMarkup(row_width=2)
-            markup_edit.add(
-                InlineKeyboardButton('✏️ Edit Nama', callback_data=f'editnama_{pid}'),
-                InlineKeyboardButton('✏️ Edit Stok', callback_data=f'editstok_{pid}')
-            )
-            bot.send_message(chat_id, text_produk, reply_markup=markup_edit)
-
-# ==========================================
-# 2. TAMBAHKAN BAGIAN INI DI BAWAH (SEBELUM if __name__ == "__main__":):
-# ==========================================
-# 5. Handler Edit Interaktif (Nama & Stok)
-@bot.callback_query_handler(func=lambda call: call.data.startswith(('editnama_', 'editstok_')))
-def edit_interactive_callback(call):
-    chat_id = call.message.chat.id
-    username = call.from_user.username
-    
-    if username != ADMIN_USERNAME:
-        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
-        return
-        
-    action, pid = call.data.split('_')
-    
-    if pid not in products_db:
-        bot.answer_callback_query(call.id, "❌ Produk tidak ditemukan!", show_alert=True)
-        return
-        
-    if action == 'editnama':
-        msg = bot.send_message(chat_id, f"Ketik nama produk baru untuk ID {pid}:")
-        bot.register_next_step_handler(msg, process_edit_nama, pid)
-    elif action == 'editstok':
-        msg = bot.send_message(chat_id, f"Ketik jumlah stok baru untuk ID {pid}:")
-        bot.register_next_step_handler(msg, process_edit_stok, pid)
-        
-    bot.answer_callback_query(call.id)
-
-def process_edit_nama(message, pid):
-    chat_id = message.chat.id
-    if message.text.startswith('/'):
-        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah.")
-        return
-        
-    nama_baru = message.text
-    products_db[pid]["nama"] = nama_baru
-    bot.send_message(chat_id, f"✅ Nama produk berhasil diubah menjadi {nama_baru}!")
-
-def process_edit_stok(message, pid):
-    chat_id = message.chat.id
-    if message.text.startswith('/'):
-        bot.send_message(chat_id, "❌ Edit dibatalkan karena Anda mengirimkan perintah.")
-        return
-        
-    try:
-        stok_baru = int(message.text)
-        products_db[pid]["stok"] = stok_baru
-        bot.send_message(chat_id, f"✅ Stok produk ID {pid} berhasil diubah menjadi {stok_baru}!")
-    except ValueError:
-        bot.send_message(chat_id, "❌ Gagal! Stok harus berupa angka.")
-`;
-
 export default function TelegramBotCodePage() {
-  const [copiedMain, setCopiedMain] = useState(false);
-  const [copiedAdmin, setCopiedAdmin] = useState(false);
-  const [copiedInteractive, setCopiedInteractive] = useState(false);
+  const [copiedBase, setCopiedBase] = useState(false);
+  const [copiedPro, setCopiedPro] = useState(false);
 
-  const handleCopyMain = () => {
-    navigator.clipboard.writeText(pythonCode);
-    setCopiedMain(true);
-    setTimeout(() => setCopiedMain(false), 2500);
+  const handleCopyBase = () => {
+    navigator.clipboard.writeText(pythonBaseCode);
+    setCopiedBase(true);
+    setTimeout(() => setCopiedBase(false), 2500);
   };
   
-  const handleCopyAdmin = () => {
-    navigator.clipboard.writeText(pythonAdminCode);
-    setCopiedAdmin(true);
-    setTimeout(() => setCopiedAdmin(false), 2500);
-  };
-
-  const handleCopyInteractive = () => {
-    navigator.clipboard.writeText(pythonInteractiveAdminCode);
-    setCopiedInteractive(true);
-    setTimeout(() => setCopiedInteractive(false), 2500);
+  const handleCopyPro = () => {
+    navigator.clipboard.writeText(pythonProAdminCode);
+    setCopiedPro(true);
+    setTimeout(() => setCopiedPro(false), 2500);
   };
 
   return (
@@ -336,8 +376,8 @@ export default function TelegramBotCodePage() {
           </div>
           <h1 className="text-3xl md:text-4xl font-medium tracking-tight mb-4">Telegram Bot Auto-Order</h1>
           <p className="text-neutral-400 max-w-2xl mx-auto">
-            Kode Python lengkap untuk sistem auto-order produk digital. Dilengkapi mock database, validasi stok, dan 
-            menu interaktif dengan <code className="text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">pyTelegramBotAPI</code>.
+            Kode Python lengkap untuk sistem auto-order produk digital. Dilengkapi mock database, validasi stok, fitur user & saldo otomatis, dan 
+            menu admin canggih interaktif dengan <code className="text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">pyTelegramBotAPI</code>.
           </p>
         </motion.div>
 
@@ -367,13 +407,13 @@ export default function TelegramBotCodePage() {
           <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-neutral-800">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-neutral-500" />
-              <span className="text-sm font-mono text-neutral-400">bot.py</span>
+              <span className="text-sm font-mono text-neutral-400">bot.py (Kode Dasar Utama)</span>
             </div>
             <button
-              onClick={handleCopyMain}
+              onClick={handleCopyBase}
               className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-neutral-800 hover:bg-neutral-700 text-neutral-300"
             >
-              {copiedMain ? (
+              {copiedBase ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="text-emerald-400">Disalin</span>
@@ -388,68 +428,30 @@ export default function TelegramBotCodePage() {
           </div>
           <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
             <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
-              <code>{pythonCode}</code>
+              <code>{pythonBaseCode}</code>
             </pre>
           </div>
         </motion.div>
 
-        {/* ADMIN CODE BLOCK */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.25 }}
-          className="mt-10 bg-neutral-900 rounded-2xl border border-indigo-900/50 overflow-hidden shadow-2xl relative"
-        >
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
-          <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-indigo-900/30">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-indigo-400" />
-              <span className="text-sm font-mono text-indigo-200">admin_panel.py</span>
-              <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full ml-2">Baru ✨</span>
-            </div>
-            <button
-              onClick={handleCopyAdmin}
-              className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-indigo-950 hover:bg-indigo-900 text-indigo-300"
-            >
-              {copiedAdmin ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Disalin</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Salin Kode Tambahan</span>
-                </>
-              )}
-            </button>
-          </div>
-          <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
-            <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
-              <code>{pythonAdminCode}</code>
-            </pre>
-          </div>
-        </motion.div>
-
-        {/* INTERACTIVE ADMIN CODE BLOCK */}
+        {/* PRO ADMIN CODE BLOCK */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
           className="mt-10 bg-neutral-900 rounded-2xl border border-indigo-500/50 overflow-hidden shadow-2xl relative"
         >
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
-          <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-emerald-900/30">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+          <div className="flex items-center justify-between px-4 py-3 bg-neutral-900 border-b border-indigo-900/30">
             <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-emerald-400" />
-              <span className="text-sm font-mono text-emerald-200">admin_interactive.py</span>
-              <span className="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full ml-2">Update ✨</span>
+              <Terminal className="w-4 h-4 text-indigo-400" />
+              <span className="text-sm font-mono text-indigo-200">admin_dashboard.py</span>
+              <span className="text-xs bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full ml-2">Fitur Pro ✨</span>
             </div>
             <button
-              onClick={handleCopyInteractive}
-              className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-emerald-950 hover:bg-emerald-900 text-emerald-300"
+              onClick={handleCopyPro}
+              className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors bg-indigo-950 hover:bg-indigo-900 text-indigo-300"
             >
-              {copiedInteractive ? (
+              {copiedPro ? (
                 <>
                   <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="text-emerald-400">Disalin</span>
@@ -457,14 +459,14 @@ export default function TelegramBotCodePage() {
               ) : (
                 <>
                   <Copy className="w-3.5 h-3.5" />
-                  <span>Salin Kode Tambahan</span>
+                  <span>Salin Setup Admin</span>
                 </>
               )}
             </button>
           </div>
           <div className="p-4 overflow-x-auto bg-[#0d0d0d]">
             <pre className="text-[13px] font-mono leading-relaxed text-neutral-300">
-              <code>{pythonInteractiveAdminCode}</code>
+              <code>{pythonProAdminCode}</code>
             </pre>
           </div>
         </motion.div>
@@ -477,12 +479,13 @@ export default function TelegramBotCodePage() {
         >
           <h3 className="text-base font-medium flex items-center gap-2 mb-4 text-neutral-200">
             <Play className="w-4 h-4" />
-            Cara Menjalankan
+            Cara Menjalankan Final
           </h3>
           <ol className="space-y-3 text-sm text-neutral-400 font-mono">
             <li><span className="text-neutral-600 mr-2">1.</span>pip install pyTelegramBotAPI python-dotenv</li>
-            <li><span className="text-neutral-600 mr-2">2.</span>Buat file <span className="text-indigo-400">.env</span> lalu masukkan <span className="text-emerald-400">API_TOKEN</span> dan <span className="text-emerald-400">ADMIN_USERNAME</span></li>
-            <li><span className="text-neutral-600 mr-2">3.</span>python bot.py</li>
+            <li><span className="text-neutral-600 mr-2">2.</span>Buat file <span className="text-indigo-400">.env</span> dan isi dengan token bot & username admin.</li>
+            <li><span className="text-neutral-600 mr-2">3.</span>Gabungkan kedua kode Python di atas ke dalam <span className="text-emerald-400">bot.py</span>.</li>
+            <li><span className="text-neutral-600 mr-2">4.</span>Jalankan: <code className="bg-neutral-800 px-1 py-0.5 rounded">python bot.py</code></li>
           </ol>
         </motion.div>
       </div>
@@ -492,18 +495,18 @@ export default function TelegramBotCodePage() {
 
 const features = [
   {
-    icon: <DollarSign className="w-4 h-4" />,
-    title: "Sistem Saldo",
-    desc: "Menggunakan dictionary lokal untuk menyimpan saldo user dengan saldo default otomatis."
+    icon: <LayoutDashboard className="w-4 h-4" />,
+    title: "Dashboard Pro",
+    desc: "Panel administratif interaktif dengan fitur manajemen nama, harga produk, & stok."
   },
   {
     icon: <Package className="w-4 h-4" />,
-    title: "Manajemen Stok",
-    desc: "Validasi pintar untuk memastikan ketersediaan stok sebelum pesanan digital diproses."
+    title: "Sistem Saldo Terpadu",
+    desc: "Melacak saldo user & tambah saldo langsung via bot."
   },
   {
     icon: <Bot className="w-4 h-4" />,
-    title: "Keyboard Interaktif",
-    desc: "Kombinasi sempurna ReplyKeyboardMarkup (Menu) dan InlineKeyboardMarkup (Navigasi)."
+    title: "Fitur Broadcast",
+    desc: "Sistem statistik dan log session interaksi untuk mengirim pesan promosi serentak."
   }
 ];
