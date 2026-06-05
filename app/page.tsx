@@ -300,7 +300,8 @@ def register_admin_handlers(bot):
     @bot.message_handler(commands=['admin'])
     def admin_dashboard(message):
         if message.from_user.id != ADMIN_ID:
-            return bot.send_message(message.chat.id, "❌ Akses Ditolak!", parse_mode='Markdown')
+            error_msg = f"❌ *Akses Ditolak!*\\nAnda bukan administrator.\\n\\n_Gunakan ID ini di .env:_ \`{message.from_user.id}\`"
+            return bot.send_message(message.chat.id, error_msg, parse_mode='Markdown')
         show_admin_menu(bot, message.chat.id)
 
     def show_admin_menu(bot, chat_id, message_id=None):
