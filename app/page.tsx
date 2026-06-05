@@ -129,11 +129,14 @@ def register_user_handlers(bot):
         
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton('📦 List Produk', callback_data='usr_produk_1'),
-            InlineKeyboardButton('📜 Riwayat Pesanan', callback_data='usr_history_1')
+            InlineKeyboardButton('🏷 List Produk', callback_data='usr_produk_1'),
+            InlineKeyboardButton('🛍 Voucher', callback_data='usr_voucher')
         )
         markup.add(
-            InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder'),
+            InlineKeyboardButton('📁 Laporan Stok', callback_data='usr_stok'),
+            InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder')
+        )
+        markup.add(
             InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
         )
         
@@ -152,11 +155,14 @@ def register_user_handlers(bot):
             if action == 'usr_back':
                 markup = InlineKeyboardMarkup(row_width=2)
                 markup.add(
-                    InlineKeyboardButton('📦 List Produk', callback_data='usr_produk_1'),
-                    InlineKeyboardButton('📜 Riwayat Pesanan', callback_data='usr_history_1')
+                    InlineKeyboardButton('🏷 List Produk', callback_data='usr_produk_1'),
+                    InlineKeyboardButton('🛍 Voucher', callback_data='usr_voucher')
                 )
                 markup.add(
-                    InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder'),
+                    InlineKeyboardButton('📁 Laporan Stok', callback_data='usr_stok'),
+                    InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder')
+                )
+                markup.add(
                     InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
                 )
                 pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\n\\nID Kamu: {chat_id}\\nPilih menu di bawah:"
@@ -217,6 +223,17 @@ def register_user_handlers(bot):
                     markup.add(*nav_buttons)
 
                 markup.add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
+                bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+            elif action == 'usr_voucher':
+                pesan = "🛍 *Voucher Diskon*\\n\\nSaat ini belum ada kode voucher yang aktif.\\nPantau terus channel kami untuk update diskon!"
+                markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
+                bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+            elif action == 'usr_stok':
+                stok = sum(p['stok'] for p in db['products_db'].values())
+                pesan = f"📁 *Laporan Stok Toko*\\n\\n📦 Total Tipe Produk: {len(db['products_db'])}\\n📦 Total Item Tersedia: {stok}\\n\\nSilakan cek 'List Produk' untuk rincian detail."
+                markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
             elif action == 'usr_caraorder':
