@@ -34,16 +34,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_TOKEN = os.getenv('API_TOKEN')
-try:
-    admin_env = os.getenv('ADMIN_ID', '').replace('"', '').replace("'", '').strip()
-    ADMIN_ID = int(admin_env) if admin_env else 0
-except ValueError:
-    ADMIN_ID = 0
+OWNER_PIN = os.getenv('OWNER_PIN', '123456')
 
 if not API_TOKEN:
     raise ValueError("API_TOKEN tidak ditemukan.")
-if not ADMIN_ID:
-    raise ValueError("ADMIN_ID tidak valid. Set ADMIN_ID di .env menggunakan Telegram ID.")
 
 logging.basicConfig(
     filename='bot_activity.log',
@@ -54,12 +48,6 @@ logging.basicConfig(
 def log_info(message):
     logging.info(message)
     print(f"INFO: {message}")
-
-def is_admin(user_id):
-    uid = getattr(user_id, 'id', user_id)
-    print(f"ADMIN_ID = {ADMIN_ID}")
-    print(f"USER_ID = {uid}")
-    return str(uid) == str(ADMIN_ID)
 `
   },
   {
@@ -298,18 +286,64 @@ def register_user_handlers(bot):
     icon: <LayoutDashboard className="w-4 h-4 text-purple-400" />,
     language: 'python',
     code: `import os
+import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import ADMIN_ID, log_info, is_admin
+from config import OWNER_PIN, log_info
 from database import db, commit, db_lock, DB_FILE
+
+owner_sessions = set()
+pin_attempts = {}
 
 def register_admin_handlers(bot):
     
     @bot.message_handler(commands=['admin'])
-    def admin_dashboard(message):
-        if not is_admin(message.from_user.id):
-            error_msg = f"❌ *Akses Ditolak!*\\nAnda bukan administrator.\\n\\n_Gunakan ID ini di .env:_ \`{message.from_user.id}\`"
-            return bot.send_message(message.chat.id, error_msg, parse_mode='Markdown')
-        show_admin_menu(bot, message.chat.id)
+    def admin_login_start(message):
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        if user_id in owner_sessions:
+            show_admin_menu(bot, chat_id)
+            return
+            
+        now = time.time()
+        if user_id in pin_attempts:
+            attempts, lockout_time = pin_attempts[user_id]
+            if lockout_time and now < lockout_time:
+                sisa_waktu = int(lockout_time - now)
+                bot.send_message(chat_id, f"⏳ Terlalu banyak percobaan. Coba lagi dalam {sisa_waktu} detik.")
+                return
+            if lockout_time and now >= lockout_time:
+                pin_attempts[user_id] = [0, 0]
+                
+        msg = bot.send_message(chat_id, "🔐 *Masukkan PIN Owner:*", parse_mode='Markdown')
+        bot.register_next_step_handler(msg, process_pin_step)
+
+    def process_pin_step(message):
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        pin_input = message.text.strip()
+        
+        now = time.time()
+        attempts, lockout_time = pin_attempts.get(user_id, [0, 0])
+        
+        if lockout_time and now < lockout_time:
+            sisa_waktu = int(lockout_time - now)
+            bot.send_message(chat_id, f"⏳ Coba lagi dalam {sisa_waktu} detik.")
+            return
+
+        if pin_input == OWNER_PIN:
+            owner_sessions.add(user_id)
+            pin_attempts[user_id] = [0, 0]
+            bot.send_message(chat_id, "✅ *Login Berhasil*\\n\\nSelamat datang di Panel Administrator.", parse_mode='Markdown')
+            show_admin_menu(bot, chat_id)
+        else:
+            attempts += 1
+            if attempts >= 5:
+                lockout_time = now + 300
+                bot.send_message(chat_id, "❌ *Akses Diblokir!*\\nAnda telah gagal 5 kali. Silakan coba 5 menit lagi.", parse_mode='Markdown')
+            else:
+                bot.send_message(chat_id, f"❌ *PIN Salah!*\\nSisa percobaan: {5 - attempts}", parse_mode='Markdown')
+            pin_attempts[user_id] = [attempts, lockout_time]
 
     def show_admin_menu(bot, chat_id, message_id=None):
         pesan = "👑 *PANEL ADMINISTRATOR*\\n\\nSemua kontrol 100% menggunakan tombol interaktif:"
@@ -330,7 +364,10 @@ def register_admin_handlers(bot):
             InlineKeyboardButton('📁 Backup Data', callback_data='adm_backup'),
             InlineKeyboardButton('🚫 Ban User', callback_data='adm_ban')
         )
-        markup.add(InlineKeyboardButton('❌ Tutup Panel', callback_data='adm_close'))
+        markup.add(
+            InlineKeyboardButton('🚪 Logout Owner', callback_data='adm_logout'),
+            InlineKeyboardButton('❌ Tutup Panel', callback_data='adm_close')
+        )
         
         try:
             if message_id:
@@ -344,12 +381,21 @@ def register_admin_handlers(bot):
     def admin_callback_handler(call):
         try:
             chat_id = call.message.chat.id
-            if not is_admin(call.from_user.id):
-                return bot.answer_callback_query(call.id, "❌ Akses Ditolak!", show_alert=True)
+            user_id = call.from_user.id
+            if user_id not in owner_sessions:
+                return bot.answer_callback_query(call.id, "❌ Sesi habis. Ketik /admin untuk login kembali.", show_alert=True)
                 
             action = call.data
             
-            if action == 'adm_close':
+            if action == 'adm_logout':
+                owner_sessions.discard(user_id)
+                bot.answer_callback_query(call.id, "✅ Berhasil logout.", show_alert=True)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except Exception:
+                    bot.edit_message_text("🚪 *Anda telah logout.*", chat_id, call.message.message_id, parse_mode='Markdown')
+                return
+            elif action == 'adm_close':
                 bot.delete_message(chat_id, call.message.message_id)
             elif action == 'adm_back':
                 show_admin_menu(bot, chat_id, call.message.message_id)
@@ -558,7 +604,7 @@ def register_admin_handlers(bot):
     icon: <File className="w-4 h-4 text-emerald-400" />,
     language: 'env',
     code: `API_TOKEN=YOUR_BOT_TOKEN_HERE
-ADMIN_ID=123456789
+OWNER_PIN=123456
 `
   },
   {
