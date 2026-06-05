@@ -35,7 +35,8 @@ load_dotenv()
 
 API_TOKEN = os.getenv('API_TOKEN')
 try:
-    ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
+    admin_env = os.getenv('ADMIN_ID', '')
+    ADMIN_ID = int(admin_env.strip()) if admin_env.strip() else 0
 except ValueError:
     ADMIN_ID = 0
 
@@ -53,6 +54,9 @@ logging.basicConfig(
 def log_info(message):
     logging.info(message)
     print(f"INFO: {message}")
+
+def is_admin(user_id):
+    return getattr(user_id, 'id', user_id) == ADMIN_ID
 `
   },
   {
@@ -292,14 +296,14 @@ def register_user_handlers(bot):
     language: 'python',
     code: `import os
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from config import ADMIN_ID, log_info
+from config import ADMIN_ID, log_info, is_admin
 from database import db, commit, db_lock, DB_FILE
 
 def register_admin_handlers(bot):
     
     @bot.message_handler(commands=['admin'])
     def admin_dashboard(message):
-        if message.from_user.id != ADMIN_ID:
+        if not is_admin(message.from_user.id):
             error_msg = f"❌ *Akses Ditolak!*\\nAnda bukan administrator.\\n\\n_Gunakan ID ini di .env:_ \`{message.from_user.id}\`"
             return bot.send_message(message.chat.id, error_msg, parse_mode='Markdown')
         show_admin_menu(bot, message.chat.id)
@@ -337,7 +341,7 @@ def register_admin_handlers(bot):
     def admin_callback_handler(call):
         try:
             chat_id = call.message.chat.id
-            if call.from_user.id != ADMIN_ID:
+            if not is_admin(call.from_user.id):
                 return bot.answer_callback_query(call.id, "❌ Akses Ditolak!", show_alert=True)
                 
             action = call.data
