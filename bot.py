@@ -64,7 +64,7 @@ def list_produk(message):
     bot.send_message(chat_id, pesan, reply_markup=inline_markup)
 
 # Handler untuk tombol transparant / Inline Keyboard
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data in ["next", "populer"])
 def callback_query(call):
     if call.data == "next":
         bot.answer_callback_query(call.id, "Halaman selanjutnya belum tersedia.")
@@ -122,6 +122,96 @@ def handle_checkout(message):
 @bot.message_handler(func=lambda message: message.text in ['🛍 Voucher', '📁 Laporan Stok', '💰 Deposit', '❓ Cara Order', '⚠️ Information'])
 def handle_other_menu(message):
     bot.send_message(message.chat.id, f"Anda memilih menu: {message.text}.\nFitur ini sedang dalam pengembangan 🛠️.")
+
+# ==========================================
+# KODE TAMBAHAN: FITUR PANEL ADMIN (DAPUR TOKO)
+# ==========================================
+
+# 1. Variabel Admin
+ADMIN_USERNAME = "username_saya_disini" # Ganti tanpa awalan '@'
+
+# 2. Perintah /loginowner
+@bot.message_handler(commands=['loginowner'])
+def login_owner(message):
+    chat_id = message.chat.id
+    username = message.from_user.username
+    
+    # Validasi Username Telegram
+    if username != ADMIN_USERNAME:
+        bot.send_message(chat_id, "❌ Akses Ditolak!")
+        return
+        
+    pesan = "Selamat datang di Panel Admin! 👨‍💻\nSilakan pilih menu pengaturan toko:"
+    
+    # InlineKeyboardMarkup dengan 3 tombol
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        InlineKeyboardButton('📦 Update Stok', callback_data='admin_stok'),
+        InlineKeyboardButton('💳 Atur Pembayaran', callback_data='admin_bayar'),
+        InlineKeyboardButton('➕ Tambah Saldo', callback_data='admin_saldo')
+    )
+    
+    bot.send_message(chat_id, pesan, reply_markup=markup)
+
+# 3. Callback Handler Admin
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+def admin_callback(call):
+    chat_id = call.message.chat.id
+    username = call.from_user.username
+    
+    # Validasi ulang di level callback
+    if username != ADMIN_USERNAME:
+        bot.answer_callback_query(call.id, "❌ Anda bukan admin!", show_alert=True)
+        return
+        
+    if call.data == 'admin_stok':
+        panduan = "Untuk update stok produk, ketik perintah:\n`/updatestok [id_produk] [jumlah_baru]`\nContoh: `/updatestok 1 20`"
+        bot.send_message(chat_id, panduan, parse_mode='Markdown')
+    elif call.data == 'admin_bayar':
+        bot.send_message(chat_id, "ℹ️ Panduan: Ketik /aturpembayaran [metode] [nomor_rekening]")
+    elif call.data == 'admin_saldo':
+        panduan = "Untuk tambah saldo user, ketik perintah:\n`/tambahsaldo [chat_id] [jumlah]`\nContoh: `/tambahsaldo 1234567 50000`"
+        bot.send_message(chat_id, panduan, parse_mode='Markdown')
+        
+    bot.answer_callback_query(call.id)
+
+# 4. Perintah Eksekusi Admin (/updatestok)
+@bot.message_handler(commands=['updatestok'])
+def update_stok(message):
+    chat_id = message.chat.id
+    username = message.from_user.username
+    
+    # Validasi Username Telegram
+    if username != ADMIN_USERNAME:
+        bot.send_message(chat_id, "❌ Akses Ditolak!")
+        return
+        
+    try:
+        # Menangkap ID produk dan jumlah baru menggunakan split()
+        # Format: /updatestok [id_produk] [jumlah_baru]
+        parts = message.text.split()
+        if len(parts) != 3:
+            bot.send_message(chat_id, "❌ Format salah!\nGunakan: /updatestok [id_produk] [jumlah_baru]")
+            return
+            
+        product_id = parts[1]
+        jumlah_baru = int(parts[2])
+        
+        # Validasi apakah ID produk ada di products_db
+        if product_id not in products_db:
+            bot.send_message(chat_id, f"❌ ID Produk '{product_id}' tidak ditemukan di Database!")
+            return
+            
+        # Eksekusi Update Stok
+        products_db[product_id]["stok"] = jumlah_baru
+        nama_produk = products_db[product_id]["nama"]
+        
+        bot.send_message(chat_id, f"✅ Stok berhasil diupdate!\n\n📦 Produk: {nama_produk}\n📊 Stok Baru: {jumlah_baru}")
+        
+    except ValueError:
+        bot.send_message(chat_id, "❌ Jumlah stok harus berupa angka!")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Terjadi kesalahan system: {str(e)}")
 
 # Menjalankan bot (loop terus menerus)
 if __name__ == "__main__":
