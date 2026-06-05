@@ -178,12 +178,12 @@ def admin_callback(call):
         return
         
     if call.data == 'admin_stok':
-        panduan = "Untuk update stok produk, ketik perintah:\\n`/updatestok [id_produk] [jumlah_baru]`\\nContoh: `/updatestok 1 20`"
+        panduan = "Untuk update stok produk, ketik perintah:\\n${'`'}/updatestok [id_produk] [jumlah_baru]${'`'}\\nContoh: ${'`'}/updatestok 1 20${'`'}"
         bot.send_message(chat_id, panduan, parse_mode='Markdown')
     elif call.data == 'admin_bayar':
         bot.send_message(chat_id, "ℹ️ Panduan: Ketik /aturpembayaran [metode] [nomor_rekening]")
     elif call.data == 'admin_saldo':
-        panduan = "Untuk tambah saldo user, ketik perintah:\\n`/tambahsaldo [chat_id] [jumlah]`\\nContoh: `/tambahsaldo 1234567 50000`"
+        panduan = "Untuk tambah saldo user, ketik perintah:\\n${'`'}/tambahsaldo [chat_id] [jumlah]${'`'}\\nContoh: ${'`'}/tambahsaldo 1234567 50000${'`'}"
         bot.send_message(chat_id, panduan, parse_mode='Markdown')
         
     bot.answer_callback_query(call.id)
