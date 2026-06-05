@@ -1,13 +1,21 @@
-'use client';
+import re
 
-import { useState } from 'react';
-import { Copy, Check, Terminal, File, FileCode2, Play, Box, LayoutDashboard, Settings } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+with open("app/page.tsx", "r", encoding="utf-8") as f:
+    content = f.read()
 
-const files = [
+# Separate the top part, the files array, and the bottom part
+match = re.search(r'(const files = \[)(.*?)(\];\n\nexport default function WorkspacePage)', content, flags=re.DOTALL)
+if not match:
+    print("Could not find files array")
+    exit(1)
+
+prefix = content[:match.start(1)]
+suffix = content[match.end(2):]
+
+files_code = """const files = [
   {
     name: 'main.py',
-    icon: <Play className="w-4 h-4 text-emerald-400" />,
+    icon: <Play className="w-4 h-4 text-green-400" />,
     language: 'python',
     code: `import telebot
 from config import API_TOKEN, log_info
@@ -42,17 +50,17 @@ except ValueError:
 if not API_TOKEN:
     raise ValueError("API_TOKEN tidak ditemukan.")
 if not ADMIN_ID:
-    raise ValueError("ADMIN_ID tidak valid. Set ADMIN_ID di .env menggunakan Telegram ID.")
+    raise ValueError("ADMIN_ID tidak ditemukan. Set ADMIN_ID di .env menggunakan Telegram ID.")
 
 logging.basicConfig(
-    filename='bot_activity.log',
+    filename='app.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
 def log_info(message):
     logging.info(message)
-    print(f"INFO: {message}")
+    print(message)
 `
   },
   {
@@ -561,111 +569,9 @@ ADMIN_ID=123456789
 python-dotenv==1.0.0
 `
   }
-];
+];"""
 
-export default function WorkspacePage() {
-  const [activeFile, setActiveFile] = useState(0);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(files[activeFile].code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-50 p-4 md:p-8 font-sans selection:bg-indigo-500/30">
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        <motion.header 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8 text-center max-w-2xl mx-auto"
-        >
-          <div className="inline-flex p-3 bg-indigo-500/10 rounded-2xl mb-5">
-            <LayoutDashboard className="w-8 h-8 text-indigo-400" />
-          </div>
-          <h1 className="text-3xl md:text-4xl font-medium tracking-tight mb-4">Enterprise Bot Architecture</h1>
-          <p className="text-neutral-400 leading-relaxed text-sm md:text-base">
-            Mengubah file <code className="text-indigo-300">bot.py</code> yang monolithic menjadi struktur 
-            <span className="text-neutral-200"> MVC Modular</span>.
-            Terdiri dari root core, modul database, config router, dan pemisahan logika handlers admin/user agar mudah di scale menjadi project enterprise yang rapih.
-          </p>
-        </motion.header>
-
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[720px]"
-        >
-          {/* Sidebar / File Explorer */}
-          <div className="lg:col-span-3 bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex flex-col shadow-xl">
-            <div className="px-4 py-3.5 border-b border-neutral-800 bg-neutral-900 flex flex-col">
-               <span className="text-xs font-semibold text-neutral-500 uppercase tracking-widest pl-1">Project Explorer</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {files.map((file, idx) => (
-                <button
-                  key={file.name}
-                  onClick={() => setActiveFile(idx)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 ${
-                    activeFile === idx 
-                      ? 'bg-indigo-500/15 text-indigo-300 font-medium' 
-                      : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200'
-                  }`}
-                >
-                  <div className={`shrink-0 ${activeFile === idx ? 'opacity-100' : 'opacity-70'}`}>
-                    {file.icon}
-                  </div>
-                  <span className="truncate">{file.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Editor Area */}
-          <div className="lg:col-span-9 bg-[#0a0a0a] border border-neutral-800 rounded-2xl overflow-hidden flex flex-col shadow-2xl relative">
-             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-800 opacity-80"></div>
-             
-             {/* Editor Header */}
-             <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800/60 bg-neutral-900/60 backdrop-blur-md">
-                <div className="flex items-center gap-2.5">
-                  <Terminal className="w-4 h-4 text-neutral-500" />
-                  <span className="text-sm text-neutral-300 font-mono tracking-wide">{files[activeFile].name}</span>
-                </div>
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 transition-colors border border-neutral-700/50"
-                >
-                  {copied ? (
-                    <><Check className="w-3.5 h-3.5 text-emerald-400"/> <span className="text-emerald-400">Tersalin</span></>
-                  ) : (
-                    <><Copy className="w-3.5 h-3.5"/> Salin Snippet</>
-                  )}
-                </button>
-             </div>
-
-             {/* Code Editor View */}
-             <div className="flex-1 overflow-auto p-5 md:p-7 relative font-mono text-[13.5px] leading-[1.6]">
-               <AnimatePresence mode="wait">
-                 <motion.div
-                   key={files[activeFile].name}
-                   initial={{ opacity: 0, y: 5 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   exit={{ opacity: 0, y: -5 }}
-                   transition={{ duration: 0.15 }}
-                 >
-                   <pre className="text-neutral-300 w-full">
-                     <code className="block w-full">{files[activeFile].code}</code>
-                   </pre>
-                 </motion.div>
-               </AnimatePresence>
-             </div>
-          </div>
-        </motion.div>
-
-      </div>
-    </div>
-  );
-}
+with open("app/page.tsx", "w", encoding="utf-8") as f:
+    f.write(prefix + files_code + suffix)
+    
+print("Successfully regenerated app/page.tsx!")

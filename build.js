@@ -1,15 +1,24 @@
-'use client';
+const fs = require('fs');
 
-import { useState } from 'react';
-import { Copy, Check, Terminal, File, FileCode2, Play, Box, LayoutDashboard, Settings } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+const content = fs.readFileSync('app/page.tsx', 'utf-8');
 
-const files = [
+const regex = /(const files = \[)(.*?)(\];\n\nexport default function WorkspacePage)/s;
+const match = regex.exec(content);
+
+if (!match) {
+    console.error("Could not find files array");
+    process.exit(1);
+}
+
+const prefix = content.substring(0, match.index + match[1].length);
+const suffix = content.substring(match.index + match[1].length + match[2].length);
+
+const files_code = `
   {
     name: 'main.py',
     icon: <Play className="w-4 h-4 text-emerald-400" />,
     language: 'python',
-    code: `import telebot
+    code: \`import telebot
 from config import API_TOKEN, log_info
 from handlers import user, admin
 
@@ -21,13 +30,13 @@ admin.register_admin_handlers(bot)
 log_info("Bot Engine Starting...")
 print("✅ Bot Digital Berjalan...")
 bot.infinity_polling()
-`
+\`
   },
   {
     name: 'config.py',
     icon: <Settings className="w-4 h-4 text-blue-400" />,
     language: 'python',
-    code: `import os
+    code: \`import os
 import logging
 from dotenv import load_dotenv
 
@@ -45,7 +54,7 @@ if not ADMIN_ID:
     raise ValueError("ADMIN_ID tidak valid. Set ADMIN_ID di .env menggunakan Telegram ID.")
 
 logging.basicConfig(
-    filename='bot_activity.log',
+    filename='app.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -53,13 +62,13 @@ logging.basicConfig(
 def log_info(message):
     logging.info(message)
     print(f"INFO: {message}")
-`
+\`
   },
   {
     name: 'database.py',
     icon: <Box className="w-4 h-4 text-orange-400" />,
     language: 'python',
-    code: `import json
+    code: \`import json
 import os
 import threading
 
@@ -76,8 +85,8 @@ default_data = {
         "store_name": "Toko Bot Digital",
         "admin_contact": "@admin_toko",
         "channel": "https://t.me/channel_toko",
-        "rules": "1. Barang tidak bisa dikembalikan.\\n2. Proses pengiriman berjalan 24 Jam.",
-        "cara_order": "1. Pilih menu List Produk.\\n2. Tekan Beli.\\n3. Produk akan dikirim."
+        "rules": "1. Barang tidak bisa dikembalikan.\\\\n2. Proses pengiriman berjalan 24 Jam.",
+        "cara_order": "1. Pilih menu List Produk.\\\\n2. Tekan Beli.\\\\n3. Produk akan dikirim."
     },
     "users_db": [],
     "orders_db": [],
@@ -104,13 +113,13 @@ def commit():
                 json.dump(db, f, indent=4)
         except Exception as e:
             print(f"Gagal save DB: {e}")
-`
+\`
   },
   {
     name: 'handlers/user.py',
     icon: <FileCode2 className="w-4 h-4 text-indigo-400" />,
     language: 'python',
-    code: `import datetime
+    code: \`import datetime
 import time
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database import db, commit, db_lock
@@ -142,7 +151,7 @@ def register_user_handlers(bot):
             InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
         )
         
-        pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\n\\nID Kamu: {chat_id}\\nPilih menu di bawah:"
+        pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\\\n\\\\nID Kamu: {chat_id}\\\\nPilih menu di bawah:"
         bot.send_message(chat_id, pesan, reply_markup=markup, parse_mode='Markdown')
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith('usr_'))
@@ -164,7 +173,7 @@ def register_user_handlers(bot):
                     InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder'),
                     InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
                 )
-                pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\n\\nID Kamu: {chat_id}\\nPilih menu di bawah:"
+                pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\\\n\\\\nID Kamu: {chat_id}\\\\nPilih menu di bawah:"
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
             elif action.startswith('usr_produk_'):
@@ -177,11 +186,11 @@ def register_user_handlers(bot):
                 start_idx = (page - 1) * per_page
                 current_products = products[start_idx:start_idx + per_page]
                 
-                pesan = f"📦 *Daftar Produk Digital Kami (Hal {page}/{total_pages}):*\\n\\n"
+                pesan = f"📦 *Daftar Produk Digital Kami (Hal {page}/{total_pages}):*\\\\n\\\\n"
                 markup = InlineKeyboardMarkup(row_width=2)
                 
                 for pid, pdata in current_products:
-                    pesan += f"🔹 *{pdata['nama']}*\\nHarga: Rp {pdata['harga']:,} | Stok: {pdata['stok']}\\n\\n"
+                    pesan += f"🔹 *{pdata['nama']}*\\\\nHarga: Rp {pdata['harga']:,} | Stok: {pdata['stok']}\\\\n\\\\n"
                     markup.add(InlineKeyboardButton(f"🛒 Beli {pdata['nama']}", callback_data=f"buy_{pid}"))
                 
                 nav_buttons = []
@@ -205,12 +214,12 @@ def register_user_handlers(bot):
                 start_idx = (page - 1) * per_page
                 current_riwayat = riwayat[start_idx:start_idx + per_page]
                 
-                pesan = f"📜 *Riwayat Pesanan Kamu (Hal {page}/{total_pages}):*\\n\\n"
+                pesan = f"📜 *Riwayat Pesanan Kamu (Hal {page}/{total_pages}):*\\\\n\\\\n"
                 if not current_riwayat:
                     pesan += "_Belum ada pesanan._"
                 else:
                     for idx, o in enumerate(current_riwayat):
-                        pesan += f"{start_idx + idx + 1}. {o['product_name']} (Rp {o['price']:,}) - {o['status']}\\n📅 {o['time']}\\n\\n"
+                        pesan += f"{start_idx + idx + 1}. {o['product_name']} (Rp {o['price']:,}) - {o['status']}\\\\n📅 {o['time']}\\\\n\\\\n"
                 
                 markup = InlineKeyboardMarkup(row_width=2)
                 nav_buttons = []
@@ -225,16 +234,16 @@ def register_user_handlers(bot):
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
             elif action == 'usr_caraorder':
-                pesan = f"❓ *Cara Order di Toko Kami*\\n\\n{db['shop_info']['cara_order']}"
+                pesan = f"❓ *Cara Order di Toko Kami*\\\\n\\\\n{db['shop_info']['cara_order']}"
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
             elif action == 'usr_info':
                 pesan = (
-                    "⚠️ *Informasi & Aturan Toko*\\n\\n"
-                    f"📋 *Rules:*\\n{db['shop_info']['rules']}\\n\\n"
-                    f"📞 *Admin:* {db['shop_info']['admin_contact']}\\n"
-                    f"📢 *Channel:* {db['shop_info']['channel']}\\n\\n"
+                    "⚠️ *Informasi & Aturan Toko*\\\\n\\\\n"
+                    f"📋 *Rules:*\\\\n{db['shop_info']['rules']}\\\\n\\\\n"
+                    f"📞 *Admin:* {db['shop_info']['admin_contact']}\\\\n"
+                    f"📢 *Channel:* {db['shop_info']['channel']}\\\\n\\\\n"
                     "_Terima kasih telah berlangganan!_"
                 )
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
@@ -275,22 +284,22 @@ def register_user_handlers(bot):
         
         log_info(f"User {chat_id} berhasil membeli {produk['nama']}")
         pesan_sukses = (
-            f"✅ *Pembelian Berhasil!*\\n\\n"
-            f"Produk: {produk['nama']}\\n\\n"
-            f"📦 *Informasi Akses:*\\n"
-            f"Email: auto_{pid}_{chat_id}@store.id\\n"
-            f"Pass: sukses123\\n\\n"
+            f"✅ *Pembelian Berhasil!*\\\\n\\\\n"
+            f"Produk: {produk['nama']}\\\\n\\\\n"
+            f"📦 *Informasi Akses:*\\\\n"
+            f"Email: auto_{pid}_{chat_id}@store.id\\\\n"
+            f"Pass: sukses123\\\\n\\\\n"
             f"_Terima kasih telah berbelanja!_"
         )
         bot.answer_callback_query(call.id, "Pembelian Berhasil!", show_alert=False)
         bot.send_message(chat_id, pesan_sukses, parse_mode='Markdown')
-`
+\`
   },
   {
     name: 'handlers/admin.py',
     icon: <LayoutDashboard className="w-4 h-4 text-purple-400" />,
     language: 'python',
-    code: `import os
+    code: \`import os
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_ID, log_info
 from database import db, commit, db_lock, DB_FILE
@@ -304,7 +313,7 @@ def register_admin_handlers(bot):
         show_admin_menu(bot, message.chat.id)
 
     def show_admin_menu(bot, chat_id, message_id=None):
-        pesan = "👑 *PANEL ADMINISTRATOR*\\n\\nSemua kontrol 100% menggunakan tombol interaktif:"
+        pesan = "👑 *PANEL ADMINISTRATOR*\\\\n\\\\nSemua kontrol 100% menggunakan tombol interaktif:"
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
             InlineKeyboardButton('📦 Kelola Produk', callback_data='adm_produk'),
@@ -350,7 +359,7 @@ def register_admin_handlers(bot):
                 stok = sum(p['stok'] for p in db['products_db'].values())
                 trx = len(db['orders_db'])
                 uang = sum(o['price'] for o in db['orders_db'])
-                pesan = f"📊 *Live Statistik Toko*\\n\\n👥 Total User: {len(db['users_db'])}\\n📦 Total Produk: {len(db['products_db'])} (Stok: {stok})\\n📋 Total Transaksi: {trx}\\n💵 Total Pendapatan: Rp {uang:,}"
+                pesan = f"📊 *Live Statistik Toko*\\\\n\\\\n👥 Total User: {len(db['users_db'])}\\\\n📦 Total Produk: {len(db['products_db'])} (Stok: {stok})\\\\n📋 Total Transaksi: {trx}\\\\n💵 Total Pendapatan: Rp {uang:,}"
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='adm_back'))
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
@@ -373,7 +382,7 @@ def register_admin_handlers(bot):
                 bot.answer_callback_query(call.id, "Fitur input text akan diproses via message state.")
                 
             elif action == 'adm_caraorder':
-                pesan = f"📝 *Edit Cara Order*\\n\\n_Saat ini:_\\n{db['shop_info']['cara_order']}"
+                pesan = f"📝 *Edit Cara Order*\\\\n\\\\n_Saat ini:_\\\\n{db['shop_info']['cara_order']}"
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton('🔄 Ubah ke Versi Pendek', callback_data='adm_caramin'))
                 markup.add(InlineKeyboardButton('📜 Ubah ke Versi Detail', callback_data='adm_caramax'))
@@ -382,7 +391,7 @@ def register_admin_handlers(bot):
 
             elif action == 'adm_caramin':
                 with db_lock:
-                    db['shop_info']['cara_order'] = "1. Pilih produk yg dimau.\\n2. Klik Beli & selesai!"
+                    db['shop_info']['cara_order'] = "1. Pilih produk yg dimau.\\\\n2. Klik Beli & selesai!"
                     commit()
                 bot.answer_callback_query(call.id, "Teks diperbarui!")
                 log_info("Admin mengubah cara order (min)")
@@ -391,7 +400,7 @@ def register_admin_handlers(bot):
                 
             elif action == 'adm_caramax':
                 with db_lock:
-                    db['shop_info']['cara_order'] = "1. Pilih menu List Produk.\\n2. Tekan Beli.\\n3. Produk akan diproses sistem."
+                    db['shop_info']['cara_order'] = "1. Pilih menu List Produk.\\\\n2. Tekan Beli.\\\\n3. Produk akan diproses sistem."
                     commit()
                 bot.answer_callback_query(call.id, "Teks diperbarui!")
                 log_info("Admin mengubah cara order (max)")
@@ -400,7 +409,7 @@ def register_admin_handlers(bot):
 
             # === KATALOG & EDITOR PRODUK ===
             elif action == 'adm_produk':
-                pesan = "📦 *Katalog Produk*\\nPilih produk untuk stok:"
+                pesan = "📦 *Katalog Produk*\\\\nPilih produk untuk stok:"
                 markup = InlineKeyboardMarkup(row_width=1)
                 for pid, pdata in db['products_db'].items():
                     markup.add(InlineKeyboardButton(f"{pdata['nama']} (Rp {pdata['harga']:,} | Stok: {pdata['stok']})", callback_data=f"adm_ep_{pid}"))
@@ -413,7 +422,7 @@ def register_admin_handlers(bot):
                     return bot.answer_callback_query(call.id, "❌ Produk tidak ditemukan!", show_alert=True)
                     
                 p = db['products_db'][pid]
-                pesan = f"🛠️ *Setel: {p['nama']}*\\n\\nHarga: Rp {p['harga']:,}\\nStok: {p['stok']}"
+                pesan = f"🛠️ *Setel: {p['nama']}*\\\\n\\\\nHarga: Rp {p['harga']:,}\\\\nStok: {p['stok']}"
                 markup = InlineKeyboardMarkup(row_width=4)
                 markup.add(
                     InlineKeyboardButton('-10 Stok', callback_data=f'adm_stk_{pid}_-10'),
@@ -460,9 +469,9 @@ def register_admin_handlers(bot):
                 start_idx = (page - 1) * per_page
                 current_users = users[start_idx:start_idx + per_page]
                 
-                pesan = f"👥 *Daftar User Aktif (Hal {page}/{total_pages})*\\n\\nTotal: {len(users)} user\\n\\n"
+                pesan = f"👥 *Daftar User Aktif (Hal {page}/{total_pages})*\\\\n\\\\nTotal: {len(users)} user\\\\n\\\\n"
                 for u in current_users:
-                    pesan += f"👤 ID: \`{u}\`\\n"
+                    pesan += f"👤 ID: \`{u}\`\\\\n"
                     
                 markup = InlineKeyboardMarkup(row_width=2)
                 nav_buttons = []
@@ -487,12 +496,12 @@ def register_admin_handlers(bot):
                 start_idx = (page - 1) * per_page
                 current_orders = orders[start_idx:start_idx + per_page]
                 
-                pesan = f"📋 *Data Pesanan Terakhir (Hal {page}/{total_pages})*\\n\\n"
+                pesan = f"📋 *Data Pesanan Terakhir (Hal {page}/{total_pages})*\\\\n\\\\n"
                 if not current_orders:
                     pesan += "_Belum ada pesanan._"
                 else:
                     for o in current_orders:
-                        pesan += f"🔹 *{o['product_name']}*\\nUser: \`{o['user_id']}\` | Status: {o['status']}\\n📅 {o['time']}\\n\\n"
+                        pesan += f"🔹 *{o['product_name']}*\\\\nUser: \`{o['user_id']}\` | Status: {o['status']}\\\\n📅 {o['time']}\\\\n\\\\n"
                 
                 markup = InlineKeyboardMarkup(row_width=2)
                 nav_buttons = []
@@ -534,138 +543,34 @@ def register_admin_handlers(bot):
                 
             # === BAN USER ===
             elif action == 'adm_ban':
-                pesan = "🚫 *Manajemen Ban User*\\n\\nDaftar user yang diblokir:\\n"
+                pesan = "🚫 *Manajemen Ban User*\\\\n\\\\nDaftar user yang diblokir:\\\\n"
                 if not db['banned_users']:
                     pesan += "_Tidak ada_"
                 for b in db['banned_users']:
-                    pesan += f"• ID: \`{b}\`\\n"
+                    pesan += f"• ID: \`{b}\`\\\\n"
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='adm_back'))
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
         except Exception as e:
             log_info(f"Error admin cb: {e}")
-`
+\`
   },
   {
     name: '.env',
     icon: <File className="w-4 h-4 text-emerald-400" />,
     language: 'env',
-    code: `API_TOKEN=YOUR_BOT_TOKEN_HERE
+    code: \`API_TOKEN=YOUR_BOT_TOKEN_HERE
 ADMIN_ID=123456789
-`
+\`
   },
   {
     name: 'requirements.txt',
     icon: <File className="w-4 h-4 text-neutral-400" />,
     language: 'text',
-    code: `pyTelegramBotAPI==4.14.0
+    code: \`pyTelegramBotAPI==4.14.0
 python-dotenv==1.0.0
-`
+\`
   }
-];
+`;
 
-export default function WorkspacePage() {
-  const [activeFile, setActiveFile] = useState(0);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(files[activeFile].code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-50 p-4 md:p-8 font-sans selection:bg-indigo-500/30">
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        <motion.header 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8 text-center max-w-2xl mx-auto"
-        >
-          <div className="inline-flex p-3 bg-indigo-500/10 rounded-2xl mb-5">
-            <LayoutDashboard className="w-8 h-8 text-indigo-400" />
-          </div>
-          <h1 className="text-3xl md:text-4xl font-medium tracking-tight mb-4">Enterprise Bot Architecture</h1>
-          <p className="text-neutral-400 leading-relaxed text-sm md:text-base">
-            Mengubah file <code className="text-indigo-300">bot.py</code> yang monolithic menjadi struktur 
-            <span className="text-neutral-200"> MVC Modular</span>.
-            Terdiri dari root core, modul database, config router, dan pemisahan logika handlers admin/user agar mudah di scale menjadi project enterprise yang rapih.
-          </p>
-        </motion.header>
-
-        <motion.div 
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-          className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[720px]"
-        >
-          {/* Sidebar / File Explorer */}
-          <div className="lg:col-span-3 bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden flex flex-col shadow-xl">
-            <div className="px-4 py-3.5 border-b border-neutral-800 bg-neutral-900 flex flex-col">
-               <span className="text-xs font-semibold text-neutral-500 uppercase tracking-widest pl-1">Project Explorer</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-1">
-              {files.map((file, idx) => (
-                <button
-                  key={file.name}
-                  onClick={() => setActiveFile(idx)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all duration-200 ${
-                    activeFile === idx 
-                      ? 'bg-indigo-500/15 text-indigo-300 font-medium' 
-                      : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200'
-                  }`}
-                >
-                  <div className={`shrink-0 ${activeFile === idx ? 'opacity-100' : 'opacity-70'}`}>
-                    {file.icon}
-                  </div>
-                  <span className="truncate">{file.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Editor Area */}
-          <div className="lg:col-span-9 bg-[#0a0a0a] border border-neutral-800 rounded-2xl overflow-hidden flex flex-col shadow-2xl relative">
-             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-800 opacity-80"></div>
-             
-             {/* Editor Header */}
-             <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-800/60 bg-neutral-900/60 backdrop-blur-md">
-                <div className="flex items-center gap-2.5">
-                  <Terminal className="w-4 h-4 text-neutral-500" />
-                  <span className="text-sm text-neutral-300 font-mono tracking-wide">{files[activeFile].name}</span>
-                </div>
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 transition-colors border border-neutral-700/50"
-                >
-                  {copied ? (
-                    <><Check className="w-3.5 h-3.5 text-emerald-400"/> <span className="text-emerald-400">Tersalin</span></>
-                  ) : (
-                    <><Copy className="w-3.5 h-3.5"/> Salin Snippet</>
-                  )}
-                </button>
-             </div>
-
-             {/* Code Editor View */}
-             <div className="flex-1 overflow-auto p-5 md:p-7 relative font-mono text-[13.5px] leading-[1.6]">
-               <AnimatePresence mode="wait">
-                 <motion.div
-                   key={files[activeFile].name}
-                   initial={{ opacity: 0, y: 5 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   exit={{ opacity: 0, y: -5 }}
-                   transition={{ duration: 0.15 }}
-                 >
-                   <pre className="text-neutral-300 w-full">
-                     <code className="block w-full">{files[activeFile].code}</code>
-                   </pre>
-                 </motion.div>
-               </AnimatePresence>
-             </div>
-          </div>
-        </motion.div>
-
-      </div>
-    </div>
-  );
-}
+fs.writeFileSync('app/page.tsx', prefix + files_code + suffix, 'utf-8');
+console.log("Rebuilt successfully");
