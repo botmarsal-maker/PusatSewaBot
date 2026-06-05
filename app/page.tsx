@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_TOKEN = os.getenv('API_TOKEN')
-OWNER_PIN = os.getenv('OWNER_PIN', '123456')
+OWNER_PIN = os.getenv('OWNER_PIN', '123456').strip().replace('"', '').replace("'", "")
 
 if not API_TOKEN:
     raise ValueError("API_TOKEN tidak ditemukan.")
@@ -342,7 +342,8 @@ def register_admin_handlers(bot):
                 lockout_time = now + 300
                 bot.send_message(chat_id, "❌ *Akses Diblokir!*\\nAnda telah gagal 5 kali. Silakan coba 5 menit lagi.", parse_mode='Markdown')
             else:
-                bot.send_message(chat_id, f"❌ *PIN Salah!*\\nSisa percobaan: {5 - attempts}", parse_mode='Markdown')
+                msg = bot.send_message(chat_id, f"❌ *PIN Salah!*\\nSisa percobaan: {5 - attempts}\\n\\nMasukkan PIN kembali:", parse_mode='Markdown')
+                bot.register_next_step_handler(msg, process_pin_step)
             pin_attempts[user_id] = [attempts, lockout_time]
 
     def show_admin_menu(bot, chat_id, message_id=None):
