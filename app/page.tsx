@@ -35,8 +35,8 @@ load_dotenv()
 
 API_TOKEN = os.getenv('API_TOKEN')
 try:
-    admin_env = os.getenv('ADMIN_ID', '')
-    ADMIN_ID = int(admin_env.strip()) if admin_env.strip() else 0
+    admin_env = os.getenv('ADMIN_ID', '').replace('"', '').replace("'", '').strip()
+    ADMIN_ID = int(admin_env) if admin_env else 0
 except ValueError:
     ADMIN_ID = 0
 
@@ -56,7 +56,10 @@ def log_info(message):
     print(f"INFO: {message}")
 
 def is_admin(user_id):
-    return getattr(user_id, 'id', user_id) == ADMIN_ID
+    uid = getattr(user_id, 'id', user_id)
+    print(f"ADMIN_ID = {ADMIN_ID}")
+    print(f"USER_ID = {uid}")
+    return str(uid) == str(ADMIN_ID)
 `
   },
   {
