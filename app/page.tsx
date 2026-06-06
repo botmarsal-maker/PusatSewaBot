@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 const files = [
   {
-    name: 'main.py',
+    name: 'bot.py',
     icon: <Play className="w-4 h-4 text-emerald-400" />,
     language: 'python',
     code: `import telebot
@@ -134,9 +134,10 @@ def register_user_handlers(bot):
         )
         markup.add(
             InlineKeyboardButton('📁 Laporan Stok', callback_data='usr_stok'),
-            InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder')
+            InlineKeyboardButton('💰 Deposit', callback_data='usr_deposit')
         )
         markup.add(
+            InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder'),
             InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
         )
         
@@ -160,9 +161,10 @@ def register_user_handlers(bot):
                 )
                 markup.add(
                     InlineKeyboardButton('📁 Laporan Stok', callback_data='usr_stok'),
-                    InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder')
+                    InlineKeyboardButton('💰 Deposit', callback_data='usr_deposit')
                 )
                 markup.add(
+                    InlineKeyboardButton('❓ Cara Order', callback_data='usr_caraorder'),
                     InlineKeyboardButton('⚠️ Information', callback_data='usr_info')
                 )
                 pesan = f"Halo selamat datang di *{db['shop_info'].get('store_name', 'Toko Bot')}*! 👋\\n\\nID Kamu: {chat_id}\\nPilih menu di bawah:"
@@ -233,6 +235,11 @@ def register_user_handlers(bot):
             elif action == 'usr_stok':
                 stok = sum(p['stok'] for p in db['products_db'].values())
                 pesan = f"📁 *Laporan Stok Toko*\\n\\n📦 Total Tipe Produk: {len(db['products_db'])}\\n📦 Total Item Tersedia: {stok}\\n\\nSilakan cek 'List Produk' untuk rincian detail."
+                markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
+                bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+            elif action == 'usr_deposit':
+                pesan = "💰 *Menu Deposit*\\n\\nSistem deposit otomatis sedang dalam pengembangan 🛠.\\nSilakan lakukan transaksi manual melalui admin."
                 markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='usr_back'))
                 bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
 
