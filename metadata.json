@@ -1,6 +1,6 @@
 {
-  "name": "Telegram Bot Auto-Order",
-  "description": "Python code snippet for a Telegram auto-order bot using telebot",
+  "name": "New Project",
+  "description": "A clean starting point.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

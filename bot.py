@@ -1,340 +1,433 @@
 import telebot
-import os
-from dotenv import load_dotenv
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+import time
+from datetime import datetime
+import random
+import string
+import database as db
+from config import BOT_TOKEN, ADMIN_ID, BANK_NAME, NOREK, ATAS_NAMA
 
-# Memuat environment variables dari file .env
-load_dotenv()
+# Inisialisasi Bot & Database
+bot = telebot.TeleBot(BOT_TOKEN)
+db.init_db()
 
-# Mengambil token dari environment
-API_TOKEN = os.getenv('API_TOKEN')
-if not API_TOKEN:
-    raise ValueError("API_TOKEN tidak ditemukan. Pastikan sudah diset di file .env")
+# State Management / Memory untuk interaktif input (qty, add product, dll)
+user_states = {}
 
-bot = telebot.TeleBot(API_TOKEN)
+def set_state(chat_id, state, data=None):
+    user_states[chat_id] = {'state': state, 'data': data or {}}
 
-# 1. Database Sementara (Mock Database) menggunakan Dictionary
-products_db = {
-    "1": {"nama": "Netflix Premium 1 Bulan", "stok": 10, "harga": 30000},
-    "2": {"nama": "Spotify Premium 1 Bulan", "stok": 5, "harga": 20000},
-    "3": {"nama": "Canva Pro 1 Bulan", "stok": 0, "harga": 15000},
-}
-user_balances = {} # Menyimpan saldo user berdasarkan chat_id
-users_db = set() # Menyimpan semua chat_id yang berinteraksi (untuk Broadcast & Statistik)
+def get_state(chat_id):
+    return user_states.get(chat_id, {'state': None, 'data': {}})
 
-# 2. Perintah /start & Menu Custom Bawah (ReplyKeyboardMarkup)
+def clear_state(chat_id):
+    if chat_id in user_states:
+        del user_states[chat_id]
+
+def format_rupiah(angka):
+    return f"Rp {int(angka):,}".replace(",", ".")
+
+def generate_invoice_id():
+    return "INV" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+# ==========================================
+# BAGIAN USER
+# ==========================================
+
+def get_main_keyboard():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+    markup.row(
+        KeyboardButton("🏷 List Produk"),
+        KeyboardButton("🛍 Voucher"),
+        KeyboardButton("📁 Laporan Stok")
+    )
+    # Add numbers 1 to 19 like the screenshot
+    buttons = [KeyboardButton(str(i)) for i in range(1, 20)]
+    
+    # Add them in chunks of 5 (1-5, 6-10, etc)
+    for i in range(0, len(buttons), 5):
+        markup.add(*buttons[i:i+5])
+    return markup
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
-    users_db.add(chat_id)
+    db.add_user(chat_id, message.chat.username)
+    clear_state(chat_id)
     
-    # Berikan saldo awal Rp50.000 jika user baru (untuk testing)
-    if chat_id not in user_balances:
-        user_balances[chat_id] = 50000
-    
-    saldo = user_balances[chat_id]
-    
-    # Membuat custom keyboard bawah (ReplyKeyboardMarkup)
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
-    # Baris 1
-    markup.row(KeyboardButton('🏷 List Produk'), KeyboardButton('🛍 Voucher'), KeyboardButton('📁 Laporan Stok'))
-    # Baris 2 (Angka untuk order cepat)
-    markup.row(KeyboardButton('1'), KeyboardButton('2'), KeyboardButton('3'))
-    # Baris 3
-    markup.row(KeyboardButton('💰 Deposit'), KeyboardButton('❓ Cara Order'), KeyboardButton('⚠️ Information'))
-    
-    pesan = (
-        f"Halo selamat datang di Bot Store Digital! 👋\n"
-        f"ID Kamu: {chat_id}\n"
-        f"Saldo saat ini: Rp {saldo:,}\n\n"
-        f"Silakan pilih menu di bawah ini untuk memulai layanan."
-    )
-    
-    bot.send_message(chat_id, pesan, reply_markup=markup)
+    bot.send_message(chat_id, "✅ Data berhasil dimuat!", reply_markup=get_main_keyboard())
+    show_products(chat_id, message_id=None, page=1)
 
-# 3. Fitur List Produk (InlineKeyboardMarkup)
-@bot.message_handler(func=lambda message: message.text == '🏷 List Produk')
-def list_produk(message):
+@bot.message_handler(func=lambda message: message.text in ["🏷 List Produk", "🛍 Voucher", "📁 Laporan Stok"] or message.text.isdigit())
+def handle_menu_text(message):
     chat_id = message.chat.id
+    text = message.text
     
-    pesan = "Daftar Produk Digital Kami:\n\n"
-    for pid, pdata in products_db.items():
-        pesan += f"[{pid}] {pdata['nama']}\n"
-        pesan += f"Harga: Rp {pdata['harga']:,} | Stok: {pdata['stok']}\n\n"
+    if text == "🏷 List Produk":
+        show_products(chat_id, message_id=None, page=1)
+    elif text == "🛍 Voucher":
+        bot.send_message(chat_id, "Fitur ini sedang dalam pengembangan 🛠.")
+    elif text == "📁 Laporan Stok":
+        bot.send_message(chat_id, "Fitur ini sedang dalam pengembangan 🛠.")
+    elif text.isdigit():
+        # Handle product selection via number
+        prod_index = int(text)
+        products = db.get_all_products()
+        if 1 <= prod_index <= len(products):
+            # Select the product at index - 1 (since 1-based indexing)
+            p = products[prod_index - 1]
+            send_product_detail(chat_id, p['id'])
+        else:
+            bot.send_message(chat_id, f"Produk nomor {prod_index} tidak ditemukan.")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('user_'))
+def handle_user_callbacks(call):
+    chat_id = call.message.chat.id
+    data = call.data
+    
+    if data == "user_list_products":
+        show_products(chat_id, call.message.message_id, page=1)
         
-    pesan += "Kirim teks atau tekan tombol angka 1, 2, atau 3 untuk langsung membeli."
-    
-    # Tombol Transparan (InlineKeyboardMarkup)
-    inline_markup = InlineKeyboardMarkup()
-    btn_next = InlineKeyboardButton('➡️ Selanjutnya', callback_data='next')
-    btn_populer = InlineKeyboardButton('🔥 PRODUK POPULER', callback_data='populer')
-    inline_markup.row(btn_next, btn_populer)
-    
-    bot.send_message(chat_id, pesan, reply_markup=inline_markup)
+    elif data == "user_popular":
+        bot.answer_callback_query(call.id, "Fitur rekomendasi produk populer segera hadir!", show_alert=True)
+              
+    elif data == "user_history":
+        orders = db.get_user_orders(chat_id)
+        if not orders:
+            text = "Belum ada transaksi di akun Anda."
+        else:
+            text = "🧾 *Riwayat Transaksi (10 Terakhir):*\n\n"
+            for o in orders:
+                prod = db.get_product(o['product_id'])
+                p_name = prod['name'] if prod else "Unknown"
+                text += f"▪️ *{o['invoice_id']}* | {p_name} (x{o['qty']})\n" \
+                        f"   Status: `{o['status'].upper()}` | {format_rupiah(o['total_price'])}\n\n"
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='Markdown')
 
-# Handler untuk tombol transparant / Inline Keyboard reguler
-@bot.callback_query_handler(func=lambda call: call.data in ["next", "populer"])
-def callback_query(call):
-    if call.data == "next":
-        bot.answer_callback_query(call.id, "Halaman selanjutnya belum tersedia.")
-    elif call.data == "populer":
-        bot.answer_callback_query(call.id, "Netflix Premium adalah produk paling populer!", show_alert=True)
-
-# 4. Logika Checkout (Auto-Order)
-@bot.message_handler(func=lambda message: message.text in products_db.keys())
-def handle_checkout(message):
-    chat_id = message.chat.id
-    product_id = message.text
+def show_products(chat_id, message_id=None, page=1):
+    items_per_page = 10
+    products = db.get_all_products()
+    total_pages = max(1, (len(products) + items_per_page - 1) // items_per_page)
     
-    # Pastikan user sudah ada
-    if chat_id not in user_balances:
-        bot.send_message(chat_id, "Silakan ketik /start terlebih dahulu.")
+    if not products:
+        if message_id:
+            bot.edit_message_text("Saat ini belum ada produk yang tersedia.", chat_id, message_id)
+        else:
+            bot.send_message(chat_id, "Saat ini belum ada produk yang tersedia.")
+        return
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = start_idx + items_per_page
+    current_products = products[start_idx:end_idx]
+
+    text = "LIST PRODUCT\n\n"
+    
+    for i, p in enumerate(current_products, start=start_idx + 1):
+        stok = db.get_stock_count(p['id'])
+        text += f"[{i}]. {p['name'].upper()} ( {stok} )\n"
+        
+    current_time = datetime.now().strftime("%I:%M:%S %p")
+    text += f"\n📄 Halaman {page} / {total_pages}\n"
+    text += f"📅 {current_time}"
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    
+    # Navigasi Pagination
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Sebelumnya", callback_data=f"page_{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton("➡️ Selanjutnya", callback_data=f"page_{page+1}"))
+    if nav_buttons:
+        markup.row(*nav_buttons)
+        
+    markup.add(InlineKeyboardButton("🔥 PRODUK POPULER", callback_data="user_popular"))
+    
+    if message_id:
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('page_'))
+def handle_pagination(call):
+    page = int(call.data.split('_')[1])
+    show_products(call.message.chat.id, call.message.message_id, page)
+
+def send_product_detail(chat_id, prod_id, message_id=None):
+    p = db.get_product(prod_id)
+    if not p:
+        if message_id:
+            bot.edit_message_text("Produk tidak ditemukan.", chat_id, message_id)
+        else:
+            bot.send_message(chat_id, "Produk tidak ditemukan.")
         return
         
-    produk = products_db[product_id]
-    saldo = user_balances[chat_id]
-    harga = produk["harga"]
-    stok = produk["stok"]
-    nama_produk = produk["nama"]
+    stok = db.get_stock_count(prod_id)
+    text = f"📦 *{p['name']}*\n\n" \
+           f"💵 Harga: {format_rupiah(p['price'])}\n" \
+           f"📊 Stok Tersedia: {stok}\n\n" \
+           f"📝 *Deskripsi:*\n{p['description']}"
+           
+    markup = InlineKeyboardMarkup(row_width=2)
+    if stok > 0:
+        markup.add(InlineKeyboardButton("💳 Beli Sekarang", callback_data=f"buy_{prod_id}"))
+    else:
+        markup.add(InlineKeyboardButton("❌ Stok Habis", callback_data="empty_stock"))
+    markup.add(InlineKeyboardButton("🔙 Kembali", callback_data="user_list_products"))
     
-    # Validasi 1: Cek Stok > 0
+    if message_id:
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='Markdown')
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='Markdown')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('prod_detail_'))
+def handle_product_detail_call(call):
+    prod_id = int(call.data.split('_')[2])
+    send_product_detail(call.message.chat.id, prod_id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('buy_'))
+def handle_buy_product(call):
+    chat_id = call.message.chat.id
+    prod_id = int(call.data.split('_')[1])
+    p = db.get_product(prod_id)
+    stok = db.get_stock_count(prod_id)
+    
     if stok <= 0:
-        bot.send_message(chat_id, f"❌ Gagal: Maaf, stok untuk produk {nama_produk} sedang kosong.")
+        bot.answer_callback_query(call.id, "Maaf, stok sudah habis.", show_alert=True)
         return
         
-    # Validasi 2: Cek Saldo >= Harga
-    if saldo < harga:
-        bot.send_message(chat_id, f"❌ Gagal: Saldo kamu (Rp {saldo:,}) tidak cukup untuk membeli {nama_produk} seharga Rp {harga:,}.\nSilakan lakukan Deposit.")
-        return
-        
-    # Eksekusi Pembelian
-    user_balances[chat_id] -= harga
-    products_db[product_id]["stok"] -= 1
+    set_state(chat_id, 'WAITING_QTY', {'product_id': prod_id, 'price': p['price'], 'max_stok': stok, 'name': p['name']})
     
-    sisa_saldo = user_balances[chat_id]
-    
-    # Pesan sukses beserta detail akun dummy
-    pesan_sukses = (
-        f"✅ Pembelian Berhasil!\n\n"
-        f"Produk: {nama_produk}\n"
-        f"Harga: Rp {harga:,}\n"
-        f"Sisa Saldo: Rp {sisa_saldo:,}\n\n"
-        f"📦 Detail Akun:\n"
-        f"Email: dummy{product_id}_{chat_id}@email.com\n"
-        f"Pass: pass{product_id}123\n\n"
-        f"Terima kasih telah berbelanja!"
-    )
-    
-    bot.send_message(chat_id, pesan_sukses)
+    msg = bot.send_message(chat_id, f"Berapa jumlah *{p['name']}* yang ingin Anda beli?\n_(Maksimal: {stok})_\n\nKetik jumlah berupa angka:", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, process_qty)
 
-# Handler untuk menu lain yang belum diimplementasikan
-@bot.message_handler(func=lambda message: message.text in ['🛍 Voucher', '📁 Laporan Stok', '💰 Deposit', '❓ Cara Order', '⚠️ Information'])
-def handle_other_menu(message):
-    bot.send_message(message.chat.id, f"Anda memilih menu: {message.text}.\nFitur ini sedang dalam pengembangan 🛠️.")
-
-# ==========================================
-# DASHBOARD ADMIN PROFESIONAL TERPADU
-# ==========================================
-
-ADMIN_USERNAME = os.getenv('ADMIN_USERNAME')
-
-@bot.message_handler(commands=['admin', 'loginowner'])
-def admin_dashboard(message):
+def process_qty(message):
     chat_id = message.chat.id
-    username = message.from_user.username
+    state = get_state(chat_id)
+    if state['state'] != 'WAITING_QTY': return
     
-    if username != ADMIN_USERNAME:
-        bot.send_message(chat_id, "❌ *Akses Ditolak!*\nAnda bukan administrator.", parse_mode='Markdown')
-        return
+    data = state['data']
+    try:
+        qty = int(message.text)
+        if qty <= 0:
+            msg = bot.send_message(chat_id, "Jumlah harus lebih dari 0. Silakan ketik angka lagi:")
+            bot.register_next_step_handler(msg, process_qty)
+            return
+        if qty > data['max_stok']:
+            msg = bot.send_message(chat_id, f"Jumlah melebihi stok. Maksimal pemesanan: {data['max_stok']}. Ketik angka lagi:")
+            bot.register_next_step_handler(msg, process_qty)
+            return
+            
+        # Detail pesanan valid
+        total_price = qty * data['price']
+        invoice_id = generate_invoice_id()
+        db.create_order(invoice_id, chat_id, data['product_id'], qty, total_price)
         
-    show_admin_menu(chat_id)
+        text = f"🧾 *INVOICE #{invoice_id}*\n\n" \
+               f"Produk: {data['name']}\n" \
+               f"Jumlah: {qty}\n" \
+               f"Harga: {format_rupiah(data['price'])}\n\n" \
+               f"💰 *Total: {format_rupiah(total_price)}*\n\n" \
+               f"Silakan transfer ke:\n" \
+               f"🏦 Bank: *{BANK_NAME}*\n" \
+               f"🔢 No Rek: *{NOREK}*\n" \
+               f"👤 Atas Nama: *{ATAS_NAMA}*\n\n" \
+               f"Lalu kirimkan FOTO bukti transfer Anda ke chat ini."
+        
+        set_state(chat_id, 'WAITING_PROOF', {'invoice_id': invoice_id})
+        bot.send_message(chat_id, text, parse_mode='Markdown')
+        
+    except ValueError:
+        msg = bot.send_message(chat_id, "Mohon masukkan angka yang valid.")
+        bot.register_next_step_handler(msg, process_qty)
 
-def show_admin_menu(chat_id, message_id=None):
-    pesan = (
-        "👑 *PANEL ADMINISTRATOR* 👑\n\n"
-        "Selamat datang di pusat kendali toko.\n"
-        "Pilih perlengkapan yang ingin Anda atur:"
-    )
+@bot.message_handler(content_types=['photo'])
+def handle_payment_proof(message):
+    chat_id = message.chat.id
+    state = get_state(chat_id)
+    if state['state'] == 'WAITING_PROOF':
+        invoice_id = state['data']['invoice_id']
+        file_id = message.photo[-1].file_id
+        
+        db.update_order_proof(invoice_id, file_id)
+        clear_state(chat_id)
+        
+        # Kirim ke user
+        bot.send_message(chat_id, "✅ *Bukti transfer telah diterima.*\n\nMohon tunggu konfirmasi admin. Produk akan dikirimkan otomatis setelah pembayaran divalidasi.", parse_mode='Markdown')
+        
+        # Teruskan ke Admin
+        order = db.get_order(invoice_id)
+        p = db.get_product(order['product_id'])
+        admin_text = f"🚨 *PEMBAYARAN BARU* 🚨\n\n" \
+                     f"Invoice: {invoice_id}\n" \
+                     f"User: [{message.chat.username or message.chat.first_name}](tg://user?id={chat_id})\n" \
+                     f"Produk: {p['name']} (x{order['qty']})\n" \
+                     f"Total: {format_rupiah(order['total_price'])}"
+                     
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("✅ Konfirmasi", callback_data=f"adm_acc_{invoice_id}"),
+            InlineKeyboardButton("❌ Tolak", callback_data=f"adm_rej_{invoice_id}")
+        )
+        
+        bot.send_photo(ADMIN_ID, file_id, caption=admin_text, reply_markup=markup, parse_mode='Markdown')
+
+
+# ==========================================
+# BAGIAN ADMIN
+# ==========================================
+
+@bot.message_handler(commands=['admin'])
+def admin_menu(message):
+    if message.chat.id != ADMIN_ID: return
+    
+    users_count = db.count_users()
+    succ_orders, total_rev = db.count_success_orders()
+    
+    text = f"👨‍💻 *PANEL ADMIN*\n\n" \
+           f"👥 Total User: {users_count}\n" \
+           f"🛒 Transaksi Berhasil: {succ_orders}\n" \
+           f"💰 Total Omset: {format_rupiah(total_rev)}\n\n" \
+           f"Silakan pilih menu manajemen:"
+           
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton('📦 Kelola Produk', callback_data='adm_produk'),
-        InlineKeyboardButton('💰 Kelola Saldo', callback_data='adm_saldo'),
-        InlineKeyboardButton('📢 Broadcast', callback_data='adm_bc'),
-        InlineKeyboardButton('📊 Statistik Toko', callback_data='adm_stats'),
-        InlineKeyboardButton('❌ Tutup Panel', callback_data='adm_close')
+        InlineKeyboardButton("➕ Tambah Produk", callback_data="adm_add_product"),
+        InlineKeyboardButton("✏ List / Edit Produk", callback_data="adm_list_product")
     )
-    if message_id:
-        bot.edit_message_text(pesan, chat_id, message_id, reply_markup=markup, parse_mode='Markdown')
-    else:
-        bot.send_message(chat_id, pesan, reply_markup=markup, parse_mode='Markdown')
+    markup.add(
+        InlineKeyboardButton("📦 Tambah Stok", callback_data="adm_add_stock"),
+        InlineKeyboardButton("📢 Broadcast", callback_data="adm_broadcast")
+    )
+    bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('adm_'))
-def admin_callback_handler(call):
+def handle_admin_callbacks(call):
     chat_id = call.message.chat.id
-    username = call.from_user.username
-    
-    if username != ADMIN_USERNAME:
-        bot.answer_callback_query(call.id, "❌ Akses Ditolak!", show_alert=True)
-        return
-        
+    if chat_id != ADMIN_ID: return
     action = call.data
     
-    if action == 'adm_close':
-        bot.delete_message(chat_id, call.message.message_id)
-        bot.answer_callback_query(call.id)
-        return
+    if action == "adm_add_product":
+        set_state(chat_id, 'ADMIN_ADD_PROD_NAME')
+        msg = bot.send_message(chat_id, "Masukkan NAMA produk baru:")
+        bot.register_next_step_handler(msg, admin_process_add_prod_name)
         
-    elif action == 'adm_back':
-        show_admin_menu(chat_id, call.message.message_id)
-        bot.answer_callback_query(call.id)
-
-    elif action == 'adm_stats':
-        total_stok = sum(p['stok'] for p in products_db.values())
-        total_uang_beredar = sum(user_balances.values()) if user_balances else 0
-        pesan = (
-            "📊 *Statistik Toko Saat Ini*\n\n"
-            f"👥 Total Pengguna: {len(users_db)}\n"
-            f"🛍 Total Variasi Produk: {len(products_db)}\n"
-            f"📦 Total Stok Gudang: {total_stok}\n"
-            f"💵 Total Uang Beredar: Rp {total_uang_beredar:,}\n"
-        )
-        markup = InlineKeyboardMarkup().add(InlineKeyboardButton('🔙 Kembali', callback_data='adm_back'))
-        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif action == 'adm_produk':
-        pesan = "📦 *Manajemen Produk*\n\nPilih produk untuk diedit, atau tambah produk:"
-        markup = InlineKeyboardMarkup(row_width=1)
-        for pid, pdata in products_db.items():
-            markup.add(InlineKeyboardButton(f"{pdata['nama']} (Stok: {pdata['stok']})", callback_data=f"adm_ep_{pid}"))
-        markup.row(
-            InlineKeyboardButton('➕ Tambah Baru', callback_data='adm_addprod'),
-            InlineKeyboardButton('🔙 Kembali', callback_data='adm_back')
-        )
-        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif action.startswith('adm_ep_'): # Edit Product
-        pid = action.split('_')[2]
-        if pid not in products_db:
-            bot.answer_callback_query(call.id, "Produk hilang!", show_alert=True)
-            return
-            
-        p = products_db[pid]
-        pesan = f"🛠️ *Detail Produk: {pid}*\n\nNama: {p['nama']}\nHarga: Rp {p['harga']:,}\nStok: {p['stok']}"
-        markup = InlineKeyboardMarkup(row_width=3)
-        markup.add(
-            InlineKeyboardButton('📝 Nama', callback_data=f'adm_snama_{pid}'),
-            InlineKeyboardButton('📦 Stok', callback_data=f'adm_sstok_{pid}'),
-            InlineKeyboardButton('💰 Harga', callback_data=f'adm_sharga_{pid}')
-        )
-        markup.add(
-            InlineKeyboardButton('🗑 Hapus Produk', callback_data=f'adm_del_{pid}'),
-            InlineKeyboardButton('🔙 Kembali', callback_data='adm_produk')
-        )
-        bot.edit_message_text(pesan, chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
-
-    elif action.startswith('adm_s'): # Set Field (nama, stok, harga)
-        parts = action.split('_')
-        field = parts[1][1:] # mengambil nama/stok/harga tanpa awalan 's'
-        pid = parts[2]
+    elif action == "adm_list_product":
+        prods = db.get_all_products()
+        markup = InlineKeyboardMarkup()
+        for p in prods:
+            markup.add(InlineKeyboardButton(f"{p['name']} - {format_rupiah(p['price'])}", callback_data=f"adm_editprod_{p['id']}"))
+        bot.edit_message_text("Pilih produk untuk diedit/dihapus:", chat_id, call.message.message_id, reply_markup=markup)
         
-        msg = bot.send_message(chat_id, f"📝 Masukkan *{field}* baru untuk ID [{pid}]:\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
-        bot.register_next_step_handler(msg, process_update_field, pid, field)
-        bot.answer_callback_query(call.id)
+    elif action == "adm_add_stock":
+        prods = db.get_all_products()
+        markup = InlineKeyboardMarkup()
+        for p in prods:
+            markup.add(InlineKeyboardButton(f"{p['name']}", callback_data=f"adm_addstk_{p['id']}"))
+        bot.edit_message_text("Pilih produk yang akan ditambah stok:", chat_id, call.message.message_id, reply_markup=markup)
         
-    elif action.startswith('adm_del_'):
-        pid = action.split('_')[2]
-        if pid in products_db:
-            nama = products_db[pid]['nama']
-            del products_db[pid]
-            bot.answer_callback_query(call.id, f"Produk {nama} telah dihapus!", show_alert=True)
-            # Kembali ke daftar produk
-            admin_callback_handler(type('obj', (object,), {'data': 'adm_produk', 'message': call.message, 'from_user': call.from_user, 'id': call.id})())
+    elif action.startswith("adm_addstk_"):
+        prod_id = int(action.split('_')[2])
+        set_state(chat_id, 'ADMIN_ADD_STOCK', {'product_id': prod_id})
+        text = "Kirim list stok (bisa pakai enter untuk massal).\n\n" \
+               "Contoh:\nemail1|pass1\nemail2|pass2\n\nKirimkan teksnya:"
+        msg = bot.send_message(chat_id, text)
+        bot.register_next_step_handler(msg, admin_process_add_stock)
 
-    elif action == 'adm_addprod':
-        msg = bot.send_message(chat_id, "➕ *Tambah Produk Baru*\n\nKetik detail produk dengan format:\n`ID | Nama Produk | Harga | Stok`\nContoh: `4 | MLBB 86 Diamonds | 25000 | 50`\n\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
-        bot.register_next_step_handler(msg, process_add_produk)
-        bot.answer_callback_query(call.id)
-
-    elif action == 'adm_bc':
-        msg = bot.send_message(chat_id, "📢 *Broadcast Message*\n\nKetik pesan yang akan dikirim ke seluruh pengguna:\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
-        bot.register_next_step_handler(msg, process_broadcast)
-        bot.answer_callback_query(call.id)
+    elif action.startswith("adm_acc_"):
+        invoice_id = action.split('_')[2]
+        admin_confirm_payment(call, invoice_id)
         
-    elif action == 'adm_saldo':
-        msg = bot.send_message(chat_id, "💰 *Kelola Saldo Pengguna*\n\nKetik Chat ID dan Nominal.\nFormat: `CHAT_ID Nominal`\nContoh: `123456789 50000` (untuk tambah Rp 50.000)\n\n*(Ketik /batal untuk membatalkan)*", parse_mode='Markdown')
-        bot.register_next_step_handler(msg, process_add_saldo)
-        bot.answer_callback_query(call.id)
+    elif action.startswith("adm_rej_"):
+        invoice_id = action.split('_')[2]
+        db.update_order_status(invoice_id, 'rejected')
+        order = db.get_order(invoice_id)
+        bot.edit_message_caption("❌ *DITOLAK*\n\n" + call.message.caption, chat_id, call.message.message_id, parse_mode='Markdown')
+        bot.send_message(order['user_id'], f"❌ Transaksi {invoice_id} Anda DITOLAK oleh admin. Hubungi admin jika ini kesalahan.")
 
-def process_update_field(message, pid, field):
-    if message.text.lower() == '/batal' or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
-        return
-        
+# -- Flow Add Produk --
+def admin_process_add_prod_name(message):
+    set_state(message.chat.id, 'ADMIN_ADD_PROD_DESC', {'name': message.text})
+    msg = bot.send_message(message.chat.id, "Masukkan DESKRIPSI produk:")
+    bot.register_next_step_handler(msg, admin_process_add_prod_desc)
+
+def admin_process_add_prod_desc(message):
+    state = get_state(message.chat.id)
+    data = state['data']
+    data['description'] = message.text
+    set_state(message.chat.id, 'ADMIN_ADD_PROD_PRICE', data)
+    msg = bot.send_message(message.chat.id, "Masukkan HARGA produk (Angka saja, misal: 15000):")
+    bot.register_next_step_handler(msg, admin_process_add_prod_price)
+
+def admin_process_add_prod_price(message):
+    state = get_state(message.chat.id)
+    data = state['data']
     try:
-        val = message.text
-        if field in ['stok', 'harga']:
-            val = int(val)
-        products_db[pid][field] = val
-        bot.send_message(message.chat.id, f"✅ Sukses! Atribut *{field}* pada produk ID {pid} kini menjadi: {val}", parse_mode='Markdown')
+        price = float(message.text)
+        db.add_product(data['name'], data['description'], price)
+        bot.send_message(message.chat.id, "✅ Produk berhasil ditambahkan!")
+        clear_state(message.chat.id)
     except ValueError:
-        bot.send_message(message.chat.id, "❌ Gagal! Pastikan harga/stok menggunakan format angka (tanpa titik/koma).")
+        msg = bot.send_message(message.chat.id, "❌ Harga tidak valid. Masukkan angka saja:")
+        bot.register_next_step_handler(msg, admin_process_add_prod_price)
 
-def process_add_produk(message):
-    if message.text.lower() == '/batal' or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
-        return
-        
-    try:
-        parts = [p.strip() for p in message.text.split('|')]
-        if len(parts) != 4:
-            bot.send_message(message.chat.id, "❌ Gagal! Pastikan format sesuai:\n`ID | Nama Produk | Harga | Stok`", parse_mode='Markdown')
-            return
+# -- Flow Add Stok --
+def admin_process_add_stock(message):
+    state = get_state(message.chat.id)
+    if state['state'] != 'ADMIN_ADD_STOCK': return
+    prod_id = state['data']['product_id']
+    
+    lines = message.text.split('\n')
+    added = 0
+    for line in lines:
+        if line.strip():
+            db.add_stock(prod_id, line.strip())
+            added += 1
             
-        pid, nama, harga, stok = parts
-        products_db[pid] = {"nama": nama, "harga": int(harga), "stok": int(stok)}
-        bot.send_message(message.chat.id, f"✅ Produk *{nama}* berhasil ditambahkan ke katalog!", parse_mode='Markdown')
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Terjadi kesalahan: {e}")
+    bot.send_message(message.chat.id, f"✅ Berhasil menambahkan {added} stok baru untuk produk tersebut.")
+    clear_state(message.chat.id)
 
-def process_broadcast(message):
-    if message.text.lower() == '/batal' or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Broadcast dibatalkan.")
+# -- Logic Konfirmasi Pembayaran --
+def admin_confirm_payment(call, invoice_id):
+    chat_id = call.message.chat.id
+    order = db.get_order(invoice_id)
+    if not order or order['status'] != 'pending':
+        bot.answer_callback_query(call.id, "Order tidak ditemukan atau sudah diproses.", show_alert=True)
         return
         
-    sukses = 0
-    for uid in list(users_db):
-        try:
-            bot.send_message(uid, f"📢 *PENGUMUMAN*\n\n{message.text}", parse_mode='Markdown')
-            sukses += 1
-        except:
-            pass # Abaikan jika bot diblokir oleh user
-    bot.send_message(message.chat.id, f"✅ Siaran Broadcast berhasil terkirim ke *{sukses}* pengguna.", parse_mode='Markdown')
-
-def process_add_saldo(message):
-    if message.text.lower() == '/batal' or message.text.startswith('/'):
-        bot.send_message(message.chat.id, "❌ Tindakan dibatalkan.")
+    product_id = order['product_id']
+    qty = order['qty']
+    user_id = order['user_id']
+    
+    # Cek ketersediaan stok
+    available_stock = db.get_available_stock(product_id, qty)
+    if len(available_stock) < qty:
+        bot.send_message(chat_id, f"⚠️ Gagal! Stok tidak cukup. Dibutuhkan: {qty}, Tersisa: {len(available_stock)}.\n"
+                                  f"Silakan tambah stok terlebih dahulu, lalu klik Konfirmasi lagi.")
         return
         
-    try:
-        uid_str, nominal_str = message.text.split()
-        uid = int(uid_str)
-        nominal = int(nominal_str)
+    # Proses pengiriman stok
+    stock_ids = [item['id'] for item in available_stock]
+    stock_data = [item['data'] for item in available_stock]
+    
+    db.mark_stock_sold(stock_ids, invoice_id)
+    db.update_order_status(invoice_id, 'paid')
+    
+    # Update UI Admin
+    bot.edit_message_caption("✅ *BERHASIL DIKONFIRMASI*\n\n" + call.message.caption, chat_id, call.message.message_id, parse_mode='Markdown')
+    
+    # Kirim ke target pembeli
+    delivery_text = f"🎉 *PEMBAYARAN BERHASIL*\n\n" \
+                    f"Terima kasih, pembayaran Invoice `{invoice_id}` telah dikonfirmasi!\n" \
+                    f"Berikut adalah detail produk Anda:\n\n"
+                    
+    for i, data in enumerate(stock_data, 1):
+        delivery_text += f"{i}. <code>{data}</code>\n"
         
-        if uid not in user_balances:
-            user_balances[uid] = 0 
-            
-        user_balances[uid] += nominal
-        bot.send_message(message.chat.id, f"✅ Saldo user `{uid}` berhasil ditambah Rp {nominal:,}.\nTotal Saldo Baru: Rp {user_balances[uid]:,}", parse_mode='Markdown')
-        
-        try:
-            bot.send_message(uid, f"💰 *Deposit Masuk!*\n\nSelamat, saldo Anda telah ditambahkan sebesar *Rp {nominal:,}* oleh tim Admin. Selamat berbelanja!", parse_mode='Markdown')
-        except:
-            pass
-    except ValueError:
-        bot.send_message(message.chat.id, "❌ Gagal! Pastikan format sesuai: `ID_USER NOMINAL_ANGKA`", parse_mode='Markdown')
-    except Exception:
-        bot.send_message(message.chat.id, "❌ Terjadi kesalahan yang tidak terduga.")
+    delivery_text += "\n_Terima kasih telah berbelanja di toko kami!_"
+    bot.send_message(user_id, delivery_text, parse_mode='HTML')
+
 
 if __name__ == "__main__":
-    print("Bot sedang berjalan... (Tekan Ctrl+C untuk berhenti)")
-    bot.polling(none_stop=True)
+    print("Bot is polling...")
+    bot.infinity_polling()
